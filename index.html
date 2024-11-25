@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Board API Frontend</title>
+</head>
+<body>
+    <h1>Job Board API</h1>
+
+    <!-- Applicant Options -->
+    <h2>Applicant</h2>
+    <button onclick="applicantSignup()">Sign Up as Applicant</button>
+    <button onclick="applicantLogin()">Login as Applicant</button>
+
+    <!-- Employer Options -->
+    <h2>Employer</h2>
+    <button onclick="employerSignup()">Sign Up as Employer</button>
+    <button onclick="employerLogin()">Login as Employer</button>
+
+    <!-- View Applicant Profile -->
+    <h2>View Applicant Profile</h2>
+    <input type="text" id="applicantUid" placeholder="Enter Applicant UID">
+    <button onclick="fetchApplicantProfile()">View Profile</button>
+
+    <pre id="response"></pre>
+
+    <script>
+        const apiUrl = 'http://localhost:5000';
+
+        async function applicantSignup() {
+            try {
+                const response = await fetch(`${apiUrl}/auth/applicant/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'applicant@example.com',
+                        password: 'password123',
+                        name: 'Applicant Name',
+                        githubLink: 'https://github.com/applicant',
+                        demoRepo: 'https://github.com/applicant/demo'
+                    })
+                });
+                document.getElementById('response').textContent = await response.text();
+            } catch (error) {
+                document.getElementById('response').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function employerSignup() {
+            try {
+                const response = await fetch(`${apiUrl}/auth/employer/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'employer@example.com',
+                        password: 'password123',
+                        companyName: 'Employer Co.',
+                        website: 'https://employer.com'
+                    })
+                });
+                document.getElementById('response').textContent = await response.text();
+            } catch (error) {
+                document.getElementById('response').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function applicantLogin() {
+            try {
+                const response = await fetch(`${apiUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: 'applicant@example.com' })
+                });
+                document.getElementById('response').textContent = JSON.stringify(await response.json(), null, 2);
+            } catch (error) {
+                document.getElementById('response').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function employerLogin() {
+            try {
+                const response = await fetch(`${apiUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: 'employer@example.com' })
+                });
+                document.getElementById('response').textContent = JSON.stringify(await response.json(), null, 2);
+            } catch (error) {
+                document.getElementById('response').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function fetchApplicantProfile() {
+            try {
+                const uid = document.getElementById('applicantUid').value;
+                const response = await fetch(`${apiUrl}/profiles/${uid}`);
+                document.getElementById('response').textContent = JSON.stringify(await response.json(), null, 2);
+            } catch (error) {
+                document.getElementById('response').textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
