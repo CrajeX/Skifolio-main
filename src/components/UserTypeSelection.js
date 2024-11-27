@@ -1,14 +1,18 @@
-// src/components/Home.js
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';  // Use useNavigate from react-router-dom v6
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom'; // Use useNavigate from react-router-dom v6
 
 const Home = ({ setUserType }) => {
     const [roleSelected, setRoleSelected] = useState(false);
-    const navigate = useNavigate();  // Initialize useNavigate hook
+    const [showAdminButton, setShowAdminButton] = useState(false);
+    const navigate = useNavigate(); // Initialize useNavigate hook
 
     const handleSelectRole = (role) => {
         setUserType(role);
         setRoleSelected(true); // Set role as selected
+    };
+
+    const toggleAdminButton = () => {
+        setShowAdminButton(true); // For example, you could set this based on a condition like user role
     };
 
     const handleChangeRole = () => {
@@ -20,6 +24,11 @@ const Home = ({ setUserType }) => {
         navigate("/admin"); // Route to AdminPage when Admit button is clicked
     };
 
+    // Example: Show the Admin button when the component is mounted
+    useEffect(() => {
+        toggleAdminButton(); // Trigger the admin button visibility on page load
+    }, []);
+
     return (
         <div className='hero'>
             <div className='Home'>
@@ -27,16 +36,16 @@ const Home = ({ setUserType }) => {
                     <h1>Ski-Folio</h1>
                     <p>A website for our young and new frontend web developers</p>
                     {!roleSelected ? (
-                        <><div className='Roles'>
-                            <button onClick={() => handleSelectRole('applicant')}>
-                                <span>I am an Applicant</span>
-                            </button>
-                            <button onClick={() => handleSelectRole('employer')}>
-                                <span>I am an Employer</span>
-                            </button>
-                        </div>
-                        <button id="admin" className="input submit" onClick={handleAdmit}>Admit</button> {/* Admit button routes to AdminPage */}
-                        <div></div></>
+                        <>
+                            <div className='Roles'>
+                                <button onClick={() => handleSelectRole('applicant')}>
+                                    <span>I am an Applicant</span>
+                                </button>
+                                <button onClick={() => handleSelectRole('employer')}>
+                                    <span>I am an Employer</span>
+                                </button>
+                            </div>
+                        </>
                     ) : (
                         <div className='Home1'>
                             <Link to="/signin">
@@ -46,11 +55,14 @@ const Home = ({ setUserType }) => {
                                 <button className="input submit">Sign Up</button>
                             </Link>
                             <button className="input submit" onClick={handleChangeRole}>Change Role</button>
-                           
                         </div>
                     )}
                 </div>
             </div>
+            {/* Footer with hidden Admin route */}
+            <footer className="footer">
+                <button className={`admin-btn ${showAdminButton ? 'show' : ''}`} onClick={handleAdmit}>Alrights Reserve 2024-2025</button>
+            </footer>
         </div>
     );
 };
