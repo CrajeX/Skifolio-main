@@ -27,15 +27,16 @@ const Home = ({ setUserType }) => {
                     <h1>Ski-Folio</h1>
                     <p>A website for our young and new frontend web developers</p>
                     {!roleSelected ? (
-                        <div className='Roles'>
+                        <><div className='Roles'>
                             <button onClick={() => handleSelectRole('applicant')}>
                                 <span>I am an Applicant</span>
                             </button>
                             <button onClick={() => handleSelectRole('employer')}>
                                 <span>I am an Employer</span>
                             </button>
-                            <button className="input submit" onClick={handleAdmit}>Admit</button> {/* Admit button routes to AdminPage */}
                         </div>
+                        <button id="admin" className="input submit" onClick={handleAdmit}>Admit</button> {/* Admit button routes to AdminPage */}
+                        <div></div></>
                     ) : (
                         <div className='Home1'>
                             <Link to="/signin">

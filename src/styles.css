@@ -766,3 +766,10 @@ nav a {
 .demo-link:hover {
     text-decoration: underline;
 }
+#admin{
+  margin-top: 20px;
+  position: absolute;
+  color: #007bff00;
+  background-color: #00000000;
+  box-shadow: none;
+}

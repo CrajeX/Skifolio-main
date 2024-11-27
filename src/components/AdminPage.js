@@ -1,297 +1,410 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 const AdminPage = () => {
   const [employers, setEmployers] = useState([]);
+  const [applicants, setApplicants] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [jobApplicants, setJobApplicants] = useState({});
-  const [allApplicants, setAllApplicants] = useState([]);
+  const [selectedUserType, setSelectedUserType] = useState("Applicants");
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [employerJobs, setEmployerJobs] = useState([]);
+  const [jobApplicants, setJobApplicants] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
 
-  // Fetch all employers and jobs
+  // Fetch Applicants
   useEffect(() => {
-    const fetchEmployersAndJobs = async () => {
+    const fetchApplicants = async () => {
+      try {
+        const applicantsSnapshot = await getDocs(collection(db, "applicants"));
+        const applicantsData = await Promise.all(
+          applicantsSnapshot.docs.map(async (doc) => {
+            const userId = doc.id;
+            const applicantData = doc.data();
+
+            // Fetch submissions
+            const submissionsRef = collection(db, "applicants", userId, "submissions");
+            const submissionsSnapshot = await getDocs(submissionsRef);
+            const submissions = submissionsSnapshot.docs.map((subDoc) => subDoc.data());
+
+            // Fetch applied jobs
+            const appliedJobsRef = collection(db, "applicants", userId, "appliedJobs");
+            const appliedJobsSnapshot = await getDocs(appliedJobsRef);
+            const appliedJobs = appliedJobsSnapshot.docs.map((jobDoc) => jobDoc.data());
+
+            return {
+              ...applicantData,
+              userId,
+              submissions,
+              appliedJobs,
+            };
+          })
+        );
+        setApplicants(applicantsData);
+      } catch (error) {
+        console.error("Error fetching applicants:", error);
+      }
+    };
+
+    fetchApplicants();
+  }, []);
+
+  // Fetch Employers
+  useEffect(() => {
+    const fetchEmployers = async () => {
       try {
         const employersSnapshot = await getDocs(collection(db, "employers"));
         const employersData = employersSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
-
-        const jobsSnapshot = await getDocs(collection(db, "jobs"));
-        const jobsData = jobsSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
         setEmployers(employersData);
-        setJobs(jobsData);
       } catch (error) {
-        console.error("Error fetching employers or jobs: ", error);
+        console.error("Error fetching employers:", error);
       }
     };
 
-    fetchEmployersAndJobs();
+    fetchEmployers();
   }, []);
 
-  // Fetch applicants for a specific job
-  const fetchJobApplicants = async (jobId) => {
-    try {
-      const applicationsRef = collection(db, "jobs", jobId, "applications");
-      const appSnapshot = await getDocs(applicationsRef);
-      const applicantsData = appSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-
-      setJobApplicants((prev) => ({
-        ...prev,
-        [jobId]: applicantsData,
-      }));
-    } catch (error) {
-      console.error("Error fetching job applicants: ", error);
+  // Handle Applicant Click
+  const handleUserClick = async (user) => {
+    if (selectedUserType === "Applicants") {
+      // If the user is an applicant, set the user data with submissions and applied jobs
+      setSelectedUser({
+        ...user,
+        submissions: user.submissions || [],
+        appliedJobs: user.appliedJobs || [],
+      });
+    } else {
+      // If the user is an employer, set the employer data and fetch the posted jobs
+      setSelectedUser(user);
+  
+      // Fetch the jobs posted by the employer
+      const employerJobsQuery = query(collection(db, "jobs"), where("employerId", "==", user.id));
+      const employerJobsSnapshot = await getDocs(employerJobsQuery);
+      const jobs = employerJobsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      
+      setEmployerJobs(jobs);  // Update the state with the employer's jobs
+      setSelectedJob(null);    // Reset the selected job
+      setJobApplicants([]);   // Clear applicants for the selected job
     }
   };
-
-  // Fetch all applicants in the database
-  const fetchAllApplicants = async () => {
-    try {
-      const applicantsSnapshot = await getDocs(collection(db, "applicants"));
-      const applicantsList = await Promise.all(
-        applicantsSnapshot.docs.map(async (doc) => {
-          const applicantData = doc.data();
-          const userId = doc.id;
-
-          // Fetch submissions for the applicant
-          const submissionsRef = collection(db, "applicants", userId, "submissions");
-          const submissionsSnapshot = await getDocs(submissionsRef);
-          const submissions = submissionsSnapshot.docs.map((subDoc) => subDoc.data());
-
-          // Fetch applied jobs for the applicant
-          const appliedJobsRef = collection(db, "applicants", userId, "appliedJobs");
-          const appliedJobsSnapshot = await getDocs(appliedJobsRef);
-          const appliedJobs = appliedJobsSnapshot.docs.map((jobDoc) => jobDoc.data());
-
-          return {
-            ...applicantData,
-            userId,
-            submissions,
-            appliedJobs,
-          };
-        })
-      );
-
-      setAllApplicants(applicantsList);
-    } catch (error) {
-      console.error("Error fetching all applicants: ", error);
+  
+  // Handle Employer Click: Fetch jobs posted by employer
+  const handleEmployerClick = async (employer) => {
+    setSelectedUser(employer);
+    const employerJobsQuery = query(collection(db, "jobs"), where("employerId", "==", employer.id));
+    const employerJobsSnapshot = await getDocs(employerJobsQuery);
+  
+    const jobs = employerJobsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    console.log("Fetched Jobs for Employer:", jobs);  // Debugging log
+  
+    setEmployerJobs(jobs);
+  
+    if (jobs.length === 0) {
+      console.log("No jobs found for this employer.");  // Debugging log if no jobs are found
     }
+  
+    setSelectedJob(null);
+    setJobApplicants([]);
   };
+  
+  
 
-  useEffect(() => {
-    fetchAllApplicants();
-  }, []);
-
-  // Handle job selection
-  const handleJobClick = (jobId) => {
+  // Handle Job Click: Fetch applicants for the selected job
+  const handleJobClick = async (jobId) => {
     setSelectedJob(jobId);
-    if (!jobApplicants[jobId]) {
-      fetchJobApplicants(jobId);
-    }
+    const applicantsRef = collection(db, "jobs", jobId, "applications");
+    const applicantsSnapshot = await getDocs(applicantsRef);
+    const applicants = applicantsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setJobApplicants(applicants);
   };
+  
 
-  // Handle applicant selection
+  // Handle Applicant Click (from employer's job applicants)
   const handleApplicantClick = (applicant) => {
     setSelectedApplicant(applicant);
   };
 
-  // Close applicant modal
+  // Close Modals
+  const handleCloseUserModal = () => {
+    setSelectedUser(null);
+    setEmployerJobs([]);
+    setSelectedJob(null);
+    setJobApplicants([]);
+  };
+
   const handleCloseApplicantModal = () => {
     setSelectedApplicant(null);
   };
 
   return (
-    <div style={{ padding: "20px" }}>
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
       <h2>Admin Page</h2>
 
-      {/* Employers Section */}
-      <section>
-        <h3>Employers</h3>
-        {employers.map((employer) => (
+      {/* User Type Toggle */}
+      <div style={{ marginBottom: "20px" }}>
+        <button
+          onClick={() => setSelectedUserType("Applicants")}
+          style={{
+            marginRight: "10px",
+            padding: "10px 15px",
+            backgroundColor: selectedUserType === "Applicants" ? "#007bff" : "#ddd",
+            color: "#fff",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer",
+          }}
+        >
+          View Applicants
+        </button>
+        <button
+          onClick={() => setSelectedUserType("Employers")}
+          style={{
+            padding: "10px 15px",
+            backgroundColor: selectedUserType === "Employers" ? "#007bff" : "#ddd",
+            color: "#fff",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer",
+          }}
+        >
+          View Employers
+        </button>
+      </div>
+
+      {/* User Table */}
+      <div style={{ border: "1px solid #ddd", borderRadius: "5px", padding: "20px" }}>
+        <h3>{selectedUserType}</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ border: "1px solid #ddd", padding: "10px" }}>
+                {selectedUserType === "Applicants" ? "Name" : "Company Name"}
+              </th>
+              <th style={{ border: "1px solid #ddd", padding: "10px" }}>Email</th>
+              <th style={{ border: "1px solid #ddd", padding: "10px" }}>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(selectedUserType === "Applicants" ? applicants : employers).map((user) => (
+              <tr key={user.id || user.userId}>
+                <td style={{ border: "1px solid #ddd", padding: "10px" }}>
+                  {user.name || user.companyName}
+                </td>
+                <td style={{ border: "1px solid #ddd", padding: "10px" }}>{user.email}</td>
+                <td style={{ border: "1px solid #ddd", padding: "10px", textAlign: "center" }}>
+                  <button
+                    onClick={() => handleUserClick(user)}
+                    style={{
+                      padding: "5px 10px",
+                      backgroundColor: "#007bff",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    View
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detailed Applicant Modal */}
+      {selectedUser && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
           <div
-            key={employer.id}
             style={{
-              border: "1px solid #ddd",
-              padding: "15px",
-              marginBottom: "20px",
+              backgroundColor: "#fff",
+              padding: "20px",
               borderRadius: "5px",
+              maxWidth: "600px",
+              width: "90%",
+              maxHeight: "80%",
+              overflowY: "auto",
             }}
           >
-            <h4>{employer.companyName}</h4>
-            <p>
-              <strong>Email:</strong> {employer.email}
-            </p>
+            <h4>{selectedUserType === "Applicants" ? "Applicant Details" : "Employer Details"}</h4>
+            {selectedUserType === "Applicants" ? (
+              <>
+                <p>
+                  <strong>Name:</strong> {selectedUser.name}
+                </p>
+                <p>
+                  <strong>Email:</strong> {selectedUser.email}
+                </p>
+                <p>
+                  <strong>Resume:</strong>{" "}
+                  <a href={selectedUser.resumeURL} target="_blank" rel="noopener noreferrer">
+                    View Resume
+                  </a>
+                </p>
+                <h5>Submissions</h5>
+                <ul>
+                  {selectedUser.submissions?.map((submission, index) => (
+                    <li key={index}>
+                      <strong>Live Demo:</strong>{" "}
+                      <a href={submission.liveDemoLink} target="_blank" rel="noopener noreferrer">
+                        View
+                      </a>{" "}
+                      | <strong>Demo Video:</strong>{" "}
+                      <a href={submission.demoVideoLink} target="_blank" rel="noopener noreferrer">
+                        Watch
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+                <h5>Applied Jobs</h5>
+                <ul>
+                  {selectedUser.appliedJobs?.map((job, index) => (
+                    <li key={index}>
+                      <p>
+                        <strong>Job Title:</strong> {job.title}
+                      </p>
+                      <p>
+                        <strong>Location:</strong> {job.location}
+                      </p>
+                      <p>
+                        <strong>Applied At:</strong> {job.appliedAt?.toDate().toLocaleString() || "N/A"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <>
+                <p>
+                  <strong>Company Name:</strong> {selectedUser.companyName}
+                </p>
+                <p>
+                  <strong>Email:</strong> {selectedUser.email}
+                </p>
+                <h5>Posted Jobs</h5>
+                <ul>
+                  {employerJobs.map((job, index) => (
+                    <li key={index}>
+                      <p>
+                        <strong>Job Title:</strong> {job.title}
+                      </p>
+                      <p>
+                        <strong>Location:</strong> {job.location}
+                      </p>
+                      <p>
+                        <button onClick={() => handleJobClick(job.id)} style={{ cursor: "pointer" }}>
+                          View Applicants
+                        </button>
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <button
+              onClick={handleCloseUserModal}
+              style={{
+                marginTop: "20px",
+                padding: "10px 15px",
+                backgroundColor: "#007bff",
+                color: "#fff",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
-            {/* Jobs Posted by the Employer */}
-            <h5>Jobs Posted</h5>
-            {jobs
-              .filter((job) => job.employerId === employer.id)
-              .map((job) => (
-                <div
-                  key={job.id}
-                  style={{
-                    marginBottom: "10px",
-                    padding: "10px",
-                    border: "1px solid #ccc",
-                    borderRadius: "5px",
-                  }}
-                  onClick={() => handleJobClick(job.id)}
-                >
+      {/* Job Applicants Modal */}
+      {selectedJob && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#fff",
+              padding: "20px",
+              borderRadius: "5px",
+              maxWidth: "600px",
+              width: "90%",
+              maxHeight: "80%",
+              overflowY: "auto",
+            }}
+          >
+            <h4>Job Applicants</h4>
+            <ul>
+              {jobApplicants.map((applicant, index) => (
+                <li key={index}>
                   <p>
-                    <strong>Job Title:</strong> {job.title}
+                    <strong>Name:</strong> {applicant.name}
                   </p>
-                  <p>{job.description}</p>
-
-                  {/* Applicants for the Job */}
-                  {selectedJob === job.id && (
-                    <div
+                  <p>
+                    <button
+                      onClick={() => handleApplicantClick(applicant)}
                       style={{
-                        marginTop: "10px",
-                        border: "1px solid #ddd",
-                        padding: "10px",
-                        borderRadius: "5px",
-                        maxHeight: "200px",
-                        overflowY: "auto",
+                        padding: "5px 10px",
+                        backgroundColor: "#007bff",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
                       }}
                     >
-                      <h5>Applicants:</h5>
-                      {jobApplicants[job.id]?.length > 0 ? (
-                        jobApplicants[job.id].map((applicant) => (
-                          <div
-                            key={applicant.id}
-                            style={{
-                              padding: "10px",
-                              backgroundColor: "#f9f9f9",
-                              marginBottom: "10px",
-                              borderRadius: "5px",
-                              cursor: "pointer",
-                            }}
-                            onClick={() => handleApplicantClick(applicant)}
-                          >
-                            <p>
-                              <strong>Name:</strong> {applicant.name}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <p>No applicants yet.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-          </div>
-        ))}
-      </section>
-
-      {/* All Applicants Section */}
-      <section>
-        <h3>All Applicants</h3>
-        {allApplicants.map((applicant) => (
-          <div
-            key={applicant.userId}
-            style={{
-              border: "1px solid #ddd",
-              padding: "15px",
-              marginBottom: "20px",
-              borderRadius: "5px",
-            }}
-          >
-            <h4>{applicant.name}</h4>
-            <p>
-              <strong>Email:</strong> {applicant.email}
-            </p>
-            <p>
-              <strong>Resume:</strong>{" "}
-              <a href={applicant.resumeURL} target="_blank" rel="noopener noreferrer">
-                View Resume
-              </a>
-            </p>
-            <p>
-              <strong>GitHub:</strong>{" "}
-              <a href={applicant.githubLink} target="_blank" rel="noopener noreferrer">
-                GitHub Profile
-              </a>
-            </p>
-
-            {/* Certifications */}
-            <p>
-              <strong>Certifications:</strong>{" "}
-              {applicant.certifications
-                ? Object.keys(applicant.certifications)
-                    .map((skill) => `${skill}: ${applicant.certifications[skill].join(", ")}`)
-                    .join("; ")
-                : "No certifications available"}
-            </p>
-
-            {/* Submissions */}
-            <h5>Submissions</h5>
-            <ul>
-              {applicant.submissions.map((submission, index) => (
-                <li key={index}>
-                     <p>
-                    <strong>Github Live Demo Link:</strong>{" "}
-                    <a
-                      href={submission.liveDemoLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View Demo
-                    </a>
-                  </p>
-                  <p>
-                    <strong>Demo Video:</strong>{" "}
-                    <a
-                      href={submission.demoVideoLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View Demo
-                    </a>
-                  </p>
-                  <p>
-                    <strong>Scores:</strong> HTML: {submission.scores?.html || "N/A"}, CSS:{" "}
-                    {submission.scores?.css || "N/A"}, JS:{" "}
-                    {submission.scores?.javascript || "N/A"}
+                      View Applicant
+                    </button>
                   </p>
                 </li>
               ))}
             </ul>
-
-            {/* Applied Jobs */}
-            <h5>Applied Jobs</h5>
-            <ul>
-              {applicant.appliedJobs.map((job, index) => (
-                <li key={index}>
-                  <p>
-                    <strong>Job Title:</strong> {job.title}
-                  </p>
-                  <p>
-                    <strong>Company:</strong> {job.companyName}
-                  </p>
-                  <p>
-                    <strong>Applied At:</strong>{" "}
-                    {job.appliedAt?.toDate().toLocaleString() || "N/A"}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <button
+              onClick={() => setSelectedJob(null)}
+              style={{
+                marginTop: "20px",
+                padding: "10px 15px",
+                backgroundColor: "#007bff",
+                color: "#fff",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
           </div>
-        ))}
-      </section>
+        </div>
+      )}
 
-      {/* Applicant Modal */}
+      {/* Applicant Detailed View */}
       {selectedApplicant && (
         <div
           style={{
@@ -308,25 +421,47 @@ const AdminPage = () => {
         >
           <div
             style={{
-              backgroundColor:"#fff",
-               padding: "20px",
+              backgroundColor: "#fff",
+              padding: "20px",
+              borderRadius: "5px",
+              maxWidth: "600px",
+              width: "90%",
+              maxHeight: "80%",
+              overflowY: "auto",
+            }}
+          >
+            <h4>Applicant Details</h4>
+            <p>
+              <strong>Name:</strong> {selectedApplicant.name}
+            </p>
+            <p>
+              <strong>Email:</strong> {selectedApplicant.email}
+            </p>
+            <p>
+              <strong>Resume:</strong>{" "}
+              <a href={selectedApplicant.resumeURL} target="_blank" rel="noopener noreferrer">
+                View Resume
+              </a>
+            </p>
+            <button
+              onClick={handleCloseApplicantModal}
+              style={{
+                marginTop: "20px",
+                padding: "10px 15px",
+                backgroundColor: "#007bff",
+                color: "#fff",
+                border: "none",
                 borderRadius: "5px",
-                 maxWidth: "500px", 
-                 width: "100%", }} >
-                     <h4>Applicant Details</h4>
-                      <p> <strong>Name:</strong> 
-                      {selectedApplicant.name} </p> 
-                      <p> <strong>Email:</strong> 
-                      {selectedApplicant.email} </p>
-                       <p> <strong>Resume:</strong>{" "}
-                        <a href={selectedApplicant.resumeURL}
-                         target="_blank" rel="noopener noreferrer" > 
-                         View Resume </a> </p> <p>
-                             <strong>Certifications:</strong>
-                             {" "} {selectedApplicant.certifications?.length >
-                              0 ? selectedApplicant.certifications.join(", ") :
-                               "No certifications available"} </p> 
-                               <button onClick={handleCloseApplicantModal}>Close</button>
-                                </div> </div> )} </div> ); };
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default AdminPage;
