@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { db, storage, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import emailjs from 'emailjs-com';  // Import EmailJS
 import '../styles.css';
+
 const EmployerProfile = () => {
     const [profilePicURL, setProfilePicURL] = useState('');
     const [coverPhotoURL, setCoverPhotoURL] = useState('');
@@ -12,6 +14,8 @@ const EmployerProfile = () => {
     const [applicants, setApplicants] = useState({});
     const [selectedJob, setSelectedJob] = useState(null);
     const [selectedApplicant, setSelectedApplicant] = useState(null);
+    const [emailSubject, setEmailSubject] = useState('');
+    const [emailBody, setEmailBody] = useState('');
 
     useEffect(() => {
         const loadEmployerData = async () => {
@@ -58,6 +62,34 @@ const EmployerProfile = () => {
         setSelectedApplicant(null);
     };
 
+    // Email sending function
+    const handleEmailSend = async () => {
+        if (selectedApplicant) {
+            const emailData = {
+                to_email: selectedApplicant.email,
+                subject: emailSubject,
+                message: emailBody,
+            };
+
+            try {
+                // Use EmailJS to send the email
+                const result = await emailjs.send(
+                    'YOUR_SERVICE_ID',  // EmailJS service ID
+                    'YOUR_TEMPLATE_ID', // EmailJS template ID
+                    emailData,          // Email data
+                    'YOUR_USER_ID'      // EmailJS user ID
+                );
+
+                alert('Email sent successfully!');
+                setEmailSubject('');
+                setEmailBody('');
+            } catch (error) {
+                console.error('Error sending email:', error);
+                alert('Failed to send email');
+            }
+        }
+    };
+
     return (
         <div>
             <h2>Welcome, {companyName}</h2>
@@ -81,8 +113,8 @@ const EmployerProfile = () => {
                                     <h5>Applicants:</h5>
                                     <div
                                         style={{
-                                            maxHeight: '200px', // Limit the height
-                                            overflowY: 'auto', // Enable vertical scrolling
+                                            maxHeight: '200px',
+                                            overflowY: 'auto',
                                             border: '1px solid #ccc',
                                             padding: '10px',
                                             borderRadius: '5px',
@@ -120,7 +152,6 @@ const EmployerProfile = () => {
                 <div className="modal-overlay1">
                     <div
                         className="modal-content1"
-                        
                     >
                         <h4>Applicant Details</h4>
                         <p><strong>Name:</strong> {selectedApplicant.name}</p>
@@ -132,7 +163,6 @@ const EmployerProfile = () => {
                                 rel="noopener noreferrer"
                             >
                                 {selectedApplicant.resumeURL}
-                                {/* View Resume */}
                             </a>
                         </p>
                         <p><strong>Certifications:</strong></p>
@@ -170,10 +200,10 @@ const EmployerProfile = () => {
                                     }}
                                 >
                                     <div>
-                                     <video width="100%" controls style={{ margin: '10px 0' }}>
-                                        <source src={submission.demoVideoLink} type="video/mp4" />
-                                        Your browser does not support the video tag.
-                                    </video>
+                                        <video width="100%" controls style={{ margin: '10px 0' }}>
+                                            <source src={submission.demoVideoLink} type="video/mp4" />
+                                            Your browser does not support the video tag.
+                                        </video>
                                     </div>
                                     <a
                                         href={submission.liveDemoLink}
@@ -183,16 +213,61 @@ const EmployerProfile = () => {
                                     >
                                         Live Demo Link: Demo {index + 1}
                                     </a>
-                                   
+
                                     <p>CSS Score: {submission.scores?.css || 'N/A'}</p>
                                     <p>HTML Score: {submission.scores?.html || 'N/A'}</p>
                                     <p>JavaScript Score: {submission.scores?.javascript || 'N/A'}</p>
                                 </div>
                             ))
                         ) : (
-                            <p>No submissions</p>
+                            <p>No submissions available</p>
                         )}
-                        <button onClick={handleCloseApplicantModal} style={{ marginTop: '10px' }}>Close</button>
+
+                        {/* Email Sending */}
+                        <div>
+                            <h4>Send Email to Applicant</h4>
+                            <input
+                                type="text"
+                                placeholder="Email Subject"
+                                value={emailSubject}
+                                onChange={(e) => setEmailSubject(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    borderRadius: '5px',
+                                }}
+                            />
+                            <textarea
+                                placeholder="Email Body"
+                                value={emailBody}
+                                onChange={(e) => setEmailBody(e.target.value)}
+                                rows="4"
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    borderRadius: '5px',
+                                    marginBottom: '10px',
+                                }}
+                            />
+                            <button
+                                onClick={handleEmailSend}
+                                style={{
+                                    padding: '10px 15px',
+                                    backgroundColor: '#007BFF',
+                                    color: '#fff',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    borderRadius: '5px',
+                                }}
+                            >
+                                Send Email
+                            </button>
+                        </div>
+
+                        <button onClick={handleCloseApplicantModal} style={{ marginTop: '20px' }}>
+                            Close
+                        </button>
                     </div>
                 </div>
             )}
