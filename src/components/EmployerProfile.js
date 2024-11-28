@@ -62,13 +62,37 @@ const EmployerProfile = () => {
     };
 
     // Open Outlook app (or default email client) with pre-filled subject and body
-    const handleEmailSend = () => {
+    const handleEmailSend = async () => {
         if (selectedApplicant) {
+            // Prepare the mailto link for Gmail
             const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-            // This will open Gmail in the browser with the email pre-filled
-            window.location.href = mailtoLink;
+    
+            // Prepare applicant status data
+            const jobId = selectedJob;
+            const applicantId = selectedApplicant.id;
+    
+            // Create or update the global applicant status document
+            const applicantStatusRef = doc(db, 'applicant_status', `${jobId}_${applicantId}`);
+            
+            try {
+                // Update or set the applicant status with the email sent status
+                await setDoc(applicantStatusRef, {
+                    jobId: jobId,
+                    applicantId: applicantId,
+                    emailStatus: 'emailed with',   // The status of the email
+                    emailSubject: emailSubject,
+                    emailBody: emailBody,
+                    emailTimestamp: new Date(),   // Timestamp of when the email was sent
+                });
+    
+                // Now, redirect to Gmail to send the email
+                window.location.href = mailtoLink;
+            } catch (error) {
+                console.error("Error updating applicant status: ", error);
+            }
         }
     };
+    
     
 
     return (
