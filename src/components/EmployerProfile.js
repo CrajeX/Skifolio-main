@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { db, storage, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import emailjs from 'emailjs-com';  // Import EmailJS
 import '../styles.css';
 
 const EmployerProfile = () => {
@@ -62,31 +61,11 @@ const EmployerProfile = () => {
         setSelectedApplicant(null);
     };
 
-    // Email sending function
-    const handleEmailSend = async () => {
+    // Open the email client with pre-filled subject and body
+    const handleEmailSend = () => {
         if (selectedApplicant) {
-            const emailData = {
-                to_email: selectedApplicant.email,
-                subject: emailSubject,
-                message: emailBody,
-            };
-
-            try {
-                // Use EmailJS to send the email
-                const result = await emailjs.send(
-                    'YOUR_SERVICE_ID',  // EmailJS service ID
-                    'YOUR_TEMPLATE_ID', // EmailJS template ID
-                    emailData,          // Email data
-                    'YOUR_USER_ID'      // EmailJS user ID
-                );
-
-                alert('Email sent successfully!');
-                setEmailSubject('');
-                setEmailBody('');
-            } catch (error) {
-                console.error('Error sending email:', error);
-                alert('Failed to send email');
-            }
+            const mailtoLink = `mailto:${selectedApplicant.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+            window.location.href = mailtoLink;  // This will open the email client
         }
     };
 
@@ -150,9 +129,7 @@ const EmployerProfile = () => {
             {/* Applicant Modal */}
             {selectedApplicant && (
                 <div className="modal-overlay1">
-                    <div
-                        className="modal-content1"
-                    >
+                    <div className="modal-content1">
                         <h4>Applicant Details</h4>
                         <p><strong>Name:</strong> {selectedApplicant.name}</p>
                         <p><strong>Email:</strong> {selectedApplicant.email}</p>
