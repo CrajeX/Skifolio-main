@@ -61,13 +61,15 @@ const EmployerProfile = () => {
         setSelectedApplicant(null);
     };
 
-    // Open the email client with pre-filled subject and body
+    // Open Outlook app (or default email client) with pre-filled subject and body
     const handleEmailSend = () => {
         if (selectedApplicant) {
-            const mailtoLink = `mailto:${selectedApplicant.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-            window.location.href = mailtoLink;  // This will open the email client
+            const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+            // This will open Gmail in the browser with the email pre-filled
+            window.location.href = mailtoLink;
         }
     };
+    
 
     return (
         <div>
@@ -234,17 +236,27 @@ const EmployerProfile = () => {
                                     backgroundColor: '#007BFF',
                                     color: '#fff',
                                     border: 'none',
-                                    cursor: 'pointer',
                                     borderRadius: '5px',
+                                    cursor: 'pointer',
                                 }}
                             >
                                 Send Email
                             </button>
+                            <button
+                                onClick={handleCloseApplicantModal}
+                                style={{
+                                    padding: '10px 15px',
+                                    backgroundColor: '#DC3545',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '5px',
+                                    cursor: 'pointer',
+                                    marginLeft: '10px',
+                                }}
+                            >
+                                Close
+                            </button>
                         </div>
-
-                        <button onClick={handleCloseApplicantModal} style={{ marginTop: '20px' }}>
-                            Close
-                        </button>
                     </div>
                 </div>
             )}
