@@ -62,41 +62,45 @@ const EmployerProfile = () => {
     const handleCloseApplicantModal = () => {
         setSelectedApplicant(null);
     };
-
-const handleEmailSend = async () => {
-    if (selectedApplicant) {
-        // Prepare the mailto link for Gmail
-        const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-
-        // Prepare applicant status data
-        const jobId = selectedJob;
-        const applicantname = selectedApplicant.name;
-
-        // Create a unique document reference for the applicant's email status
-        const applicantStatusRef = doc(db, 'applicant_status', `${jobId}_${applicantname}`);
+    const handleEmailSend = async () => {
+        if (selectedApplicant) {
+            // Prepare the mailto link for Gmail
+            const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         
-        try {
-            // Create or update the applicant status with the email sent status
-            await setDoc(applicantStatusRef, {
-                jobId: jobId,
-                applicantname: applicantname,
-                emailStatus: 'emailed with',   // Status of the email
-                emailSubject: emailSubject,
-                emailBody: emailBody,
-                emailTimestamp: new Date(),   // Timestamp when the email was sent
-            });
-
-            // Now, redirect to Gmail to send the email
-            window.location.href = mailtoLink;
-        } catch (error) {
-            console.error("Error updating applicant status: ", error);
+            // Prepare applicant status data
+            const jobId = selectedJob;
+            const applicantName = selectedApplicant.name;
+        
+            // Create a unique document reference for the applicant's email status
+            const applicantStatusRef = doc(db, 'applicant_status', `${jobId}_${applicantName}`);
+            const emailSentApplicantsRef = doc(db, 'jobs', jobId, 'email_sent_applicants', selectedApplicant.name);
+        
+            try {
+                // Create or update the applicant status with the email sent status
+                await setDoc(applicantStatusRef, {
+                    jobId: jobId,
+                    applicantName: applicantName,
+                    emailStatus: 'emailed with',   // Status of the email
+                    emailSubject: emailSubject,
+                    emailBody: emailBody,
+                    emailTimestamp: new Date(),   // Timestamp when the email was sent
+                });
+        
+                // Move the applicant to the 'email_sent_applicants' subcollection
+                await setDoc(emailSentApplicantsRef, selectedApplicant);
+        
+                // Remove the applicant from the 'applications' subcollection
+                const applicantDocRef = doc(db, 'jobs', jobId, 'applications', selectedApplicant.id);
+                await updateDoc(applicantDocRef, { removed: true });
+        
+                // Now, open Gmail in a new tab to send the email
+                window.open(mailtoLink, '_blank');
+            } catch (error) {
+                console.error("Error updating applicant status: ", error);
+            }
         }
-    }
-};
-
-    
-    
-
+    };
+       
     return (
         <div>
             <h2>Welcome, {companyName}</h2>
