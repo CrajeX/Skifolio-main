@@ -89,8 +89,8 @@ const EmployerProfile = () => {
                 // Move the applicant to the 'email_sent_applicants' subcollection
                 await setDoc(emailSentApplicantsRef, selectedApplicant);
         
-                // Remove the applicant from the 'applications' subcollection
-                const applicantDocRef = doc(db, 'jobs', jobId, 'applications', selectedApplicant.id);
+                // Now remove the applicant from the 'applications' subcollection using their ID
+                const applicantDocRef = doc(db, 'jobs', jobId, 'applications', selectedApplicant.id);  // Use selectedApplicant.id
                 await updateDoc(applicantDocRef, { removed: true });
         
                 // Now, open Gmail in a new tab to send the email
@@ -100,6 +100,7 @@ const EmployerProfile = () => {
             }
         }
     };
+    
        
     return (
         <div>
