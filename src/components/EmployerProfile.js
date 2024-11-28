@@ -3,6 +3,8 @@ import { db, storage, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import '../styles.css';
+import { setDoc} from 'firebase/firestore';
+
 
 const EmployerProfile = () => {
     const [profilePicURL, setProfilePicURL] = useState('');
@@ -15,7 +17,7 @@ const EmployerProfile = () => {
     const [selectedApplicant, setSelectedApplicant] = useState(null);
     const [emailSubject, setEmailSubject] = useState('');
     const [emailBody, setEmailBody] = useState('');
-
+    
     useEffect(() => {
         const loadEmployerData = async () => {
             const userDoc = await getDoc(doc(db, 'employers', auth.currentUser.uid));
@@ -61,37 +63,37 @@ const EmployerProfile = () => {
         setSelectedApplicant(null);
     };
 
-    // Open Outlook app (or default email client) with pre-filled subject and body
-    const handleEmailSend = async () => {
-        if (selectedApplicant) {
-            // Prepare the mailto link for Gmail
-            const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-    
-            // Prepare applicant status data
-            const jobId = selectedJob;
-            const applicantId = selectedApplicant.id;
-    
-            // Create or update the global applicant status document
-            const applicantStatusRef = doc(db, 'applicant_status', `${jobId}_${applicantId}`);
-            
-            try {
-                // Update or set the applicant status with the email sent status
-                await setDoc(applicantStatusRef, {
-                    jobId: jobId,
-                    applicantId: applicantId,
-                    emailStatus: 'emailed with',   // The status of the email
-                    emailSubject: emailSubject,
-                    emailBody: emailBody,
-                    emailTimestamp: new Date(),   // Timestamp of when the email was sent
-                });
-    
-                // Now, redirect to Gmail to send the email
-                window.location.href = mailtoLink;
-            } catch (error) {
-                console.error("Error updating applicant status: ", error);
-            }
+const handleEmailSend = async () => {
+    if (selectedApplicant) {
+        // Prepare the mailto link for Gmail
+        const mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${selectedApplicant.email}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+
+        // Prepare applicant status data
+        const jobId = selectedJob;
+        const applicantname = selectedApplicant.name;
+
+        // Create a unique document reference for the applicant's email status
+        const applicantStatusRef = doc(db, 'applicant_status', `${jobId}_${applicantname}`);
+        
+        try {
+            // Create or update the applicant status with the email sent status
+            await setDoc(applicantStatusRef, {
+                jobId: jobId,
+                applicantname: applicantname,
+                emailStatus: 'emailed with',   // Status of the email
+                emailSubject: emailSubject,
+                emailBody: emailBody,
+                emailTimestamp: new Date(),   // Timestamp when the email was sent
+            });
+
+            // Now, redirect to Gmail to send the email
+            window.location.href = mailtoLink;
+        } catch (error) {
+            console.error("Error updating applicant status: ", error);
         }
-    };
+    }
+};
+
     
     
 
