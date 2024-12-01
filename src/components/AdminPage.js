@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
-
+import {
+  deleteDoc,
+  doc,
+  addDoc,
+} from "firebase/firestore";
+import { setDoc} from "firebase/firestore";
 const AdminPage = () => {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isApplicant, setIsApplicant] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [employers, setEmployers] = useState([]);
   const [applicants, setApplicants] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -12,7 +21,8 @@ const AdminPage = () => {
   const [jobApplicants, setJobApplicants] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
-
+  const [pendingJobs, setPendingJobs] = useState([]);
+  const [isUserClassVisible, setIsUserClassVisible] = useState(true)
   // Fetch Applicants
   useEffect(() => {
     const fetchApplicants = async () => {
@@ -32,7 +42,7 @@ const AdminPage = () => {
             const appliedJobsRef = collection(db, "applicants", userId, "appliedJobs");
             const appliedJobsSnapshot = await getDocs(appliedJobsRef);
             const appliedJobs = appliedJobsSnapshot.docs.map((jobDoc) => jobDoc.data());
-
+            
             return {
               ...applicantData,
               userId,
@@ -49,6 +59,39 @@ const AdminPage = () => {
 
     fetchApplicants();
   }, []);
+  useEffect(() => {
+    const fetchPendingJobs = async () => {
+      try {
+        const jobsSnapshot = await getDocs(collection(db, "jobs-to-be-approved"));
+        const jobsData = jobsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setPendingJobs(jobsData);
+      } catch (error) {
+        console.error("Error fetching pending jobs:", error);
+      }
+    };
+
+    fetchPendingJobs();
+  }, []);
+  const handleToggleClass = () => {
+    // // Only toggle visibility if selectedUserType is "Applicants" or "Employers"
+    // if (selectedUserType !== "Applicants" || selectedUserType !== "Employers") {
+    //   // Set the selectedUserType to "JobsToBeApproved"
+    //   setSelectedUserType("JobsToBeApproved");
+  
+    // // Find the element with the "JobsToBeApproved" class or ID
+    // const jobsToBeApprovedElement = document.querySelector(".JobsToBeApproved");
+
+    //   // Check if the element exists before toggling visibility
+    //   if (jobsToBeApprovedElement) {
+    //     setIsUserClassVisible(true); // Show the JobsToBeApproved content
+    //   }
+    // }
+    setIsUserClassVisible(true);
+  };
+
 
   // Fetch Employers
   useEffect(() => {
@@ -68,6 +111,14 @@ const AdminPage = () => {
     fetchEmployers();
   }, []);
 
+  const handleLogin = () => {
+    // Hardcoded Admin Credentials
+    if (username === "admin" && password === "admin123") {
+      setIsAdmin(true);
+    } else {
+      alert("Invalid credentials");
+    }
+  };
   // Handle Applicant Click
   const handleUserClick = async (user) => {
     if (selectedUserType === "Applicants") {
@@ -126,6 +177,7 @@ const AdminPage = () => {
   // Handle Applicant Click (from employer's job applicants)
   const handleApplicantClick = (applicant) => {
     setSelectedApplicant(applicant);
+    setIsApplicant(true);
   };
 
   // Close Modals
@@ -139,19 +191,104 @@ const AdminPage = () => {
   const handleCloseApplicantModal = () => {
     setSelectedApplicant(null);
   };
+  const handlePublishJob = async (job) => {
+    try {
+      // Add job to the 'jobs' collection
+      await setDoc(doc(db, "jobs", job.id), job);
 
+      // Delete job from 'jobs-to-be-approved'
+      await deleteDoc(doc(db, "jobs-to-be-approved", job.id));
+
+      // Update local state
+      setPendingJobs(pendingJobs.filter((j) => j.id !== job.id));
+      setSelectedJob(null);
+      alert("Job published successfully.");
+    } catch (error) {
+      console.error("Error publishing job:", error);
+      alert("Failed to publish job. Please try again.");
+    }
+  };
+  const handleRejectJob = async (jobId) => {
+    try {
+      setIsApplicant(true)
+      // Delete job from 'jobs-to-be-approved'
+      await deleteDoc(doc(db, "jobs-to-be-approved", jobId));
+
+      // Update local state
+      setPendingJobs(pendingJobs.filter((j) => j.id !== jobId));
+      setSelectedJob(null);
+      alert("Job rejected successfully.");
+    } catch (error) {
+      console.error("Error rejecting job:", error);
+      alert("Failed to reject job. Please try again.");
+    }
+  };
+  useEffect(() => {
+    const userDiv = document.querySelector(".user");
+    if (userDiv) {
+      if (selectedUserType === "JobsToBeApproved") {
+        userDiv.classList.add("user");
+      } else {
+        userDiv.classList.remove("user");
+      }
+    }
+  }, [selectedUserType]);
+
+  const toggleUserDivClass = () => {
+    setSelectedUserType(selectedUserType === "JobsToBeApproved" ? "Applicants" : "JobsToBeApproved");
+  };
+  
+  
+  if (!isAdmin) {
+    return (
+      <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+        <h2>Admin Login</h2>
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          style={{ padding: "10px", margin: "10px", borderRadius: "5px" }}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={{ padding: "10px", margin: "10px", borderRadius: "5px" }}
+        />
+        <button
+          onClick={handleLogin}
+          style={{
+            padding: "10px 15px",
+            backgroundColor: "#007bff",
+            color: "#fff",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer"
+          }}
+        >
+          Login
+        </button>
+      </div>
+    );
+  }
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+    <><div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
       <h2>Admin Page</h2>
 
       {/* User Type Toggle */}
       <div style={{ marginBottom: "20px" }}>
         <button
-          onClick={() => setSelectedUserType("Applicants")}
+         onClick={() => {
+            setSelectedUserType("Applicants");
+            setIsUserClassVisible(false);
+          }}
+          
           style={{
             marginRight: "10px",
             padding: "10px 15px",
-            backgroundColor: selectedUserType === "Applicants" ? "#007bff" : "#ddd",
+            backgroundColor: selectedUserType === "Applicants" && !isUserClassVisible ? "#007bff" : "#ddd",
             color: "#fff",
             border: "none",
             borderRadius: "5px",
@@ -161,10 +298,13 @@ const AdminPage = () => {
           View Applicants
         </button>
         <button
-          onClick={() => setSelectedUserType("Employers")}
+          onClick={() => {
+            setSelectedUserType("Employers")
+            setIsUserClassVisible(false)
+        }}
           style={{
             padding: "10px 15px",
-            backgroundColor: selectedUserType === "Employers" ? "#007bff" : "#ddd",
+            backgroundColor: selectedUserType === "Employers" && !isUserClassVisible ? "#007bff" : "#ddd",
             color: "#fff",
             border: "none",
             borderRadius: "5px",
@@ -173,10 +313,34 @@ const AdminPage = () => {
         >
           View Employers
         </button>
+        <button
+               onClick={handleToggleClass}
+               style={{
+                 marginRight: "10px",
+                 padding: "10px 15px",
+                 backgroundColor: isUserClassVisible ? "#007bff" : "#ddd",
+                 color: "#fff",
+                 border: "none",
+                 borderRadius: "5px",
+                 cursor: "pointer",
+               }}
+        //   {/* style={{
+        //     marginRight: "10px",
+        //     padding: "10px 15px",
+        //     backgroundColor: selectedUserType === "JobsToBeApproved" ? "#007bff" : "#ddd",
+        //     color: "#fff",
+        //     border: "none",
+        //     borderRadius: "5px",
+        //     cursor: "pointer",
+        //   }} */}
+        >
+          Jobs to Be Approved
+        </button>
       </div>
 
       {/* User Table */}
-      <div style={{ border: "1px solid #ddd", borderRadius: "5px", padding: "20px" }}>
+      {!isUserClassVisible && (
+      <div className="user" style={{ border: "1px solid #ddd", borderRadius: "5px", padding: "20px" }}>
         <h3>{selectedUserType}</h3>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -215,7 +379,7 @@ const AdminPage = () => {
           </tbody>
         </table>
       </div>
-
+      )};
       {/* Detailed Applicant Modal */}
       {selectedUser && (
         <div
@@ -242,81 +406,86 @@ const AdminPage = () => {
               overflowY: "auto",
             }}
           >
-            <h4>{selectedUserType === "Applicants" ? "Applicant Details" : "Employer Details"}</h4>
-            {selectedUserType === "Applicants" ? (
-              <>
-                <p>
-                  <strong>Name:</strong> {selectedUser.name}
-                </p>
-                <p>
-                  <strong>Email:</strong> {selectedUser.email}
-                </p>
-                <p>
-                  <strong>Resume:</strong>{" "}
-                  <a href={selectedUser.resumeURL} target="_blank" rel="noopener noreferrer">
-                    View Resume
-                  </a>
-                </p>
-                <h5>Submissions</h5>
-                <ul>
-                  {selectedUser.submissions?.map((submission, index) => (
-                    <li key={index}>
-                      <strong>Live Demo:</strong>{" "}
-                      <a href={submission.liveDemoLink} target="_blank" rel="noopener noreferrer">
-                        View
-                      </a>{" "}
-                      | <strong>Demo Video:</strong>{" "}
-                      <a href={submission.demoVideoLink} target="_blank" rel="noopener noreferrer">
-                        Watch
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-                <h5>Applied Jobs</h5>
-                <ul>
-                  {selectedUser.appliedJobs?.map((job, index) => (
-                    <li key={index}>
-                      <p>
-                        <strong>Job Title:</strong> {job.title}
-                      </p>
-                      <p>
-                        <strong>Location:</strong> {job.location}
-                      </p>
-                      <p>
-                        <strong>Applied At:</strong> {job.appliedAt?.toDate().toLocaleString() || "N/A"}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <>
-                <p>
-                  <strong>Company Name:</strong> {selectedUser.companyName}
-                </p>
-                <p>
-                  <strong>Email:</strong> {selectedUser.email}
-                </p>
-                <h5>Posted Jobs</h5>
-                <ul>
-                  {employerJobs.map((job, index) => (
-                    <li key={index}>
-                      <p>
-                        <strong>Job Title:</strong> {job.title}
-                      </p>
-                      <p>
-                        <strong>Location:</strong> {job.location}
-                      </p>
-                      <p>
-                        <button onClick={() => handleJobClick(job.id)} style={{ cursor: "pointer" }}>
-                          View Applicants
-                        </button>
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+            <h4>{selectedUserType === "Applicants" ? "Applicant Details" : ("Employer Details" && selectedUserType !== "JobsToBeApproved")}</h4>
+
+            {selectedUserType === "Applicants" && !isUserClassVisible ? (
+  <>
+    <p>
+      <strong>Name:</strong> {selectedUser.name}
+    </p>
+    <p>
+      <strong>Email:</strong> {selectedUser.email}
+    </p>
+    <p>
+      <strong>Resume:</strong>{" "}
+      <a href={selectedUser.resumeURL} target="_blank" rel="noopener noreferrer">
+        View Resume
+      </a>
+    </p>
+    <h5>Submissions</h5>
+    <ul>
+      {selectedUser.submissions?.map((submission, index) => (
+        <li key={index}>
+          <strong>Live Demo:</strong>{" "}
+          <a href={submission.liveDemoLink} target="_blank" rel="noopener noreferrer">
+            View
+          </a>{" "}
+          | <strong>Demo Video:</strong>{" "}
+          <a href={submission.demoVideoLink} target="_blank" rel="noopener noreferrer">
+            Watch
+          </a>
+        </li>
+      ))}
+    </ul>
+    <h5>Applied Jobs</h5>
+    <ul>
+      {selectedUser.appliedJobs?.map((job, index) => (
+        <li key={index}>
+          <p>
+            <strong>Job Title:</strong> {job.title}
+          </p>
+          <p>
+            <strong>Location:</strong> {job.location}
+          </p>
+          <p>
+            <strong>Applied At:</strong> {job.appliedAt?.toDate().toLocaleString() || "N/A"}
+          </p>
+        </li>
+      ))}
+    </ul>
+  </>
+) : selectedUserType !== "Applicants" && !isUserClassVisible ? (
+  <>
+    <p>
+      <strong>Company Name:</strong> {selectedUser.companyName}
+    </p>
+    <p>
+      <strong>Email:</strong> {selectedUser.email}
+    </p>
+    <h5>Posted Jobs</h5>
+    <ul>
+      {employerJobs.map((job, index) => (
+        <li key={index}>
+          <p>
+            <strong>Job Title:</strong> {job.title}
+          </p>
+          <p>
+            <strong>Location:</strong> {job.location}
+          </p>
+          <p>
+            <button onClick={() => handleJobClick(job.id)} style={{ cursor: "pointer" }}>
+              View Applicants
+            </button>
+          </p>
+        </li>
+      ))}
+    </ul>
+  </>
+) : null}
+
+
+
+
             <button
               onClick={handleCloseUserModal}
               style={{
@@ -461,6 +630,139 @@ const AdminPage = () => {
         </div>
       )}
     </div>
+    {(isUserClassVisible == true)  && (
+        <div  style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+          <h2>Jobs to Be Approved</h2>
+
+          {/* Pending Jobs Table */}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #ddd", padding: "10px" }}>Job Title</th>
+                <th style={{ border: "1px solid #ddd", padding: "10px" }}>Company Name</th>
+                <th style={{ border: "1px solid #ddd", padding: "10px" }}>Location</th>
+                <th style={{ border: "1px solid #ddd", padding: "10px" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingJobs.map((job) => (
+                <tr key={job.id}>
+                  <td style={{ border: "1px solid #ddd", padding: "10px" }}>{job.title}</td>
+                  <td style={{ border: "1px solid #ddd", padding: "10px" }}>{job.companyName}</td>
+                  <td style={{ border: "1px solid #ddd", padding: "10px" }}>{job.location}</td>
+                  <td style={{ border: "1px solid #ddd", padding: "10px", textAlign: "center" }}>
+                    <button
+                      onClick={() => {
+                        setSelectedJob(job);
+                        setIsApplicant(false);
+                      }}
+                      style={{
+                        padding: "5px 10px",
+                        marginRight: "5px",
+                        backgroundColor: "#007bff",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => handleRejectJob(job.id)}
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#ff4d4d",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Job Details Modal */}
+          {selectedJob && !isApplicant && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                backgroundColor: "rgba(0, 0, 0, 0.5)",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <div
+                id="jobdetails"
+                style={{
+                  backgroundColor: "#fff",
+                  padding: "20px",
+                  borderRadius: "5px",
+                  maxWidth: "600px",
+                  width: "90%",
+                  maxHeight: "80%",
+                  overflowY: "auto",
+                }}
+              >
+                <h4>Job Details</h4>
+                <p>
+                  <strong>Title:</strong> {selectedJob.title}
+                </p>
+                <p>
+                  <strong>Company Name:</strong> {selectedJob.companyName}
+                </p>
+                <p>
+                  <strong>Location:</strong> {selectedJob.location}
+                </p>
+                <p>
+                  <strong>Description:</strong> {selectedJob.description || "No description provided."}
+                </p>
+                <button
+                  onClick={() => {
+                    handlePublishJob(selectedJob);
+                    setSelectedJob(null);
+                  }}
+                  style={{
+                    padding: "10px 20px",
+                    backgroundColor: "#28a745",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    marginRight: "10px",
+                  }}
+                >
+                  Publish
+                </button>
+                <button
+                  onClick={() => setSelectedJob(null)}
+                  style={{
+                    padding: "10px 20px",
+                    backgroundColor: "#6c757d",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )};
+    </>
   );
 };
 

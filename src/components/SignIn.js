@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 const SignIn = () => {
     const [email, setEmail] = useState('');
@@ -12,8 +13,23 @@ const SignIn = () => {
     const handleSignIn = async (e) => {
         e.preventDefault();
         try {
-            await signInWithEmailAndPassword(auth, email, password);
-            navigate('/profile'); // Redirect to a profile page after sign-in
+            // Sign in with email and password
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const user = userCredential.user;
+
+            // Fetch user data from Firestore to determine if they are an applicant or employer
+            const applicantDoc = await getDoc(doc(db, 'applicants', user.uid));
+            const employerDoc = await getDoc(doc(db, 'employers', user.uid));
+
+            if (applicantDoc.exists()) {
+                // Redirect to applicant profile if user is found in applicants collection
+                navigate('/applicant/profile');
+            } else if (employerDoc.exists()) {
+                // Redirect to employer profile if user is found in employers collection
+                navigate('/employer/profile');
+            } else {
+                console.error("User type not found in database.");
+            }
         } catch (error) {
             console.error("Error signing in:", error);
         }
@@ -43,7 +59,7 @@ const SignIn = () => {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
-                            style={{ width: '100%',marginLeft:'-2px' }}
+                            style={{ width: '100%', marginLeft: '-2px' }}
                         />
                         <button
                             type="button"

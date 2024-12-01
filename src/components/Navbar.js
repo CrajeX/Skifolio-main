@@ -94,7 +94,7 @@ const Navbar = ({ userType, onLogout }) => {
               <>
                 <li className="nav-item">
                   <Link className="nav-link" to="/employer/profile">
-                    Profile
+                    Jobs
                   </Link>
                 </li>
                 <li className="nav-item">

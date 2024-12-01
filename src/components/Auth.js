@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
 import { auth, db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, GithubAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    GithubAuthProvider,
+    signInWithPopup
+} from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 const Auth = ({ userType, setUser }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false); // State to toggle password visibility
+    const [showPassword, setShowPassword] = useState(false);
     const [name, setName] = useState('');
     const [githubLink, setGithubLink] = useState('');
     const [companyName, setCompanyName] = useState('');
@@ -27,29 +32,30 @@ const Auth = ({ userType, setUser }) => {
             if (isSignUp) {
                 userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 setUser(userCredential.user);
-                navigate('/signin');
-
+                // Navigate to the appropriate profile page after sign-up
                 if (userType === 'applicant') {
                     await setDoc(doc(db, 'applicants', userCredential.user.uid), {
                         name,
                         email,
                         githubLink,
                     });
-                }
-                if (userType === 'employer') {
+                    navigate('/applicant/profile');  // Redirect to applicant profile
+                } else if (userType === 'employer') {
                     await setDoc(doc(db, 'employers', userCredential.user.uid), {
                         email,
                         companyName,
                     });
+                    navigate('/employer/profile');  // Redirect to employer profile
                 }
             } else {
-                if (!agreedToTerms) {
-                    alert('Please accept the terms and conditions.');
-                    return;
-                }
                 userCredential = await signInWithEmailAndPassword(auth, email, password);
                 setUser(userCredential.user);
-                navigate('/signin');
+                // Redirect to the appropriate profile page after sign-in
+                if (userType === 'applicant') {
+                    navigate('/applicant/profile');
+                } else if (userType === 'employer') {
+                    navigate('/employer/profile');
+                }
             }
         } catch (error) {
             console.error("Error signing in/up:", error);
@@ -71,16 +77,16 @@ const Auth = ({ userType, setUser }) => {
                         required
                         style={{ marginBottom: '10px', width: '100%' }}
                     />
-                    <div style={{ position: 'relative', width: '100%', marginBottom: '10px' }}>
+                    <div style={{ position: 'relative', width: '100%', marginBottom: '10px', marginLeft: "-30PX" }}>
                         <input
                             id='password'
                             className='input'
-                            type={showPassword ? "text" : "password"} // Dynamic input type
+                            type={showPassword ? "text" : "password"}
                             placeholder="Password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
-                            style={{ width: '100%',marginLeft:'-2px' }}
+                            style={{ width: '100%' }}
                         />
                         <button
                             type="button"
@@ -93,7 +99,7 @@ const Auth = ({ userType, setUser }) => {
                                 background: 'none',
                                 border: 'none',
                                 cursor: 'pointer',
-                                color:'black'
+                                color: 'black'
                             }}
                         >
                             {showPassword ? 'Hide' : 'Show'}
@@ -121,6 +127,16 @@ const Auth = ({ userType, setUser }) => {
                                 onChange={(e) => setGithubLink(e.target.value)}
                                 style={{ marginBottom: '10px', width: '100%' }}
                             />
+                            <div style={{ marginBottom: '20px', textAlign: 'center', width: '100%' }}>
+                                <a
+                                    href="https://github.com/signup"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: '#007bff', textDecoration: 'none' }}
+                                >
+                                    Don't have a GitHub account? Sign up here.
+                                </a>
+                            </div>
                         </>
                     )}
 
