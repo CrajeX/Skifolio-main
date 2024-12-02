@@ -126,7 +126,7 @@ useEffect(() => {
     };
 
     fetchUsersToApprove();
-}, []);
+}, [showDeletedFiles]);
 
 useEffect(() => {
   const fetchUsersToApprove = async () => {
@@ -147,6 +147,7 @@ useEffect(() => {
         console.error("Error fetching deleted files:", error);
     }
 };
+if (showDeletedFiles) fetchDeletedFiles();
   fetchUsersToApprove();
 }, [showDeletedFiles]); 
 
