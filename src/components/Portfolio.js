@@ -99,7 +99,7 @@ const Portfolio = () => {
 
             // Analyze live demo link
             const newPayload = { url: liveDemoLink };
-            const response = await axios.post('https://casestudy-19cm.onrender.com/analyze', newPayload);
+            const response = await axios.post('https://skifolio-main.onrender.com/analyze', newPayload);
 
             if (response?.data?.scores) {
                 const newSubmission = {
