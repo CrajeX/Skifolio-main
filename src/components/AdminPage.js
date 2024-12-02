@@ -23,6 +23,7 @@ const AdminPage = () => {
   const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [pendingJobs, setPendingJobs] = useState([]);
   const [isUserClassVisible, setIsUserClassVisible] = useState(true)
+  const [isUserApproval, setUserApproval] = useState(true)
   // Fetch Applicants
   useEffect(() => {
     const fetchApplicants = async () => {
@@ -90,8 +91,103 @@ const AdminPage = () => {
     //   }
     // }
     setIsUserClassVisible(true);
+    setUserApproval(false);
   };
+  const handleToggleApproval = () => {
+    // // Only toggle visibility if selectedUserType is "Applicants" or "Employers"
+    // if (selectedUserType !== "Applicants" || selectedUserType !== "Employers") {
+    //   // Set the selectedUserType to "JobsToBeApproved"
+    //   setSelectedUserType("JobsToBeApproved");
+  
+    // // Find the element with the "JobsToBeApproved" class or ID
+    // const jobsToBeApprovedElement = document.querySelector(".JobsToBeApproved");
 
+    //   // Check if the element exists before toggling visibility
+    //   if (jobsToBeApprovedElement) {
+    //     setIsUserClassVisible(true); // Show the JobsToBeApproved content
+    //   }
+    // }
+    setUserApproval(true);
+  };
+  // Fetch Users to Approve
+const [usersToApprove, setUsersToApprove] = useState([]);
+const [deletedFiles, setDeletedFiles] = useState([]);
+const [showDeletedFiles, setShowDeletedFiles] = useState(false); // Toggle for deleted files view
+
+useEffect(() => {
+    const fetchUsersToApprove = async () => {
+        try {
+            const snapshot = await getDocs(collection(db, "userAccountsToBeApproved"));
+            const users = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+            setUsersToApprove(users);
+        } catch (error) {
+            console.error("Error fetching users to approve:", error);
+        }
+    };
+
+    fetchUsersToApprove();
+}, []);
+
+useEffect(() => {
+  const fetchUsersToApprove = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "userAccountsToBeApproved"));
+      const users = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setUsersToApprove(users);
+    } catch (error) {
+      console.error("Error fetching users to approve:", error);
+    }
+  };
+  const fetchDeletedFiles = async () => {
+    try {
+        const snapshot = await getDocs(collection(db, "deletedFiles"));
+        const files = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setDeletedFiles(files);
+    } catch (error) {
+        console.error("Error fetching deleted files:", error);
+    }
+};
+  fetchUsersToApprove();
+}, [showDeletedFiles]); 
+
+
+// Approve User
+const handleApproveUser = async (user) => {
+    try {
+        const targetCollection = user.type === "applicant" ? "applicants" : "employers";
+
+        // Add user to the target collection
+        await setDoc(doc(db, targetCollection, user.id), { ...user, status: "approved" });
+
+        // Remove user from the approval collection
+        await deleteDoc(doc(db, "userAccountsToBeApproved", user.id));
+
+        // Update local state
+        setUsersToApprove(usersToApprove.filter((u) => u.id !== user.id));
+        alert("User approved successfully.");
+    } catch (error) {
+        console.error("Error approving user:", error);
+        alert("Failed to approve user. Please try again.");
+    }
+};
+
+// Reject User
+const handleRejectUser = async (user) => {
+    try {
+        // Move user data to the `deletedFiles` collection
+        await setDoc(doc(db, "deletedFiles", user.id), user);
+
+        // Remove user from the approval collection
+        await deleteDoc(doc(db, "userAccountsToBeApproved", user.id));
+
+        // Update local state
+        setUsersToApprove(usersToApprove.filter((u) => u.id !== user.id));
+        alert("User rejected and moved to deleted files.");
+    } catch (error) {
+        console.error("Error rejecting user:", error);
+        alert("Failed to reject user. Please try again.");
+    }
+};
 
   // Fetch Employers
   useEffect(() => {
@@ -283,6 +379,7 @@ const AdminPage = () => {
          onClick={() => {
             setSelectedUserType("Applicants");
             setIsUserClassVisible(false);
+            setUserApproval(false);
           }}
           
           style={{
@@ -301,6 +398,7 @@ const AdminPage = () => {
           onClick={() => {
             setSelectedUserType("Employers")
             setIsUserClassVisible(false)
+            setUserApproval(false);
         }}
           style={{
             padding: "10px 15px",
@@ -335,11 +433,33 @@ const AdminPage = () => {
         //   }} */}
         >
           Jobs to Be Approved
+       
         </button>
+        <button
+      id="approve"
+      onClick={() => {
+
+        setUserApproval(true);
+        setShowDeletedFiles(!showDeletedFiles);
+        setIsUserClassVisible(false);
+      }}
+      style={{
+        padding: "10px 15px",
+        backgroundColor: selectedUserType === "Employers" && !isUserClassVisible ? "#007bff" : "#ddd",
+        color: "#fff",
+        border: "none",
+        borderRadius: "5px",
+        cursor: "pointer",
+      }}
+      >
+      {showDeletedFiles
+        ? "Deleted Files"
+        : `View User Accounts (${usersToApprove.length || 0} Waiting)`}
+    </button>
       </div>
 
       {/* User Table */}
-      {!isUserClassVisible && (
+      {!isUserClassVisible &&(
       <div className="user" style={{ border: "1px solid #ddd", borderRadius: "5px", padding: "20px" }}>
         <h3>{selectedUserType}</h3>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -630,7 +750,7 @@ const AdminPage = () => {
         </div>
       )}
     </div>
-    {(isUserClassVisible == true)  && (
+    {(isUserClassVisible == true) &&(
         <div  style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
           <h2>Jobs to Be Approved</h2>
 
@@ -759,9 +879,68 @@ const AdminPage = () => {
                 </button>
               </div>
             </div>
+            
           )}
         </div>
       )};
+      {!showDeletedFiles && (
+        <div>
+            <h2>Users Pending Approval</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name/Company</th>
+                        <th>Email</th>
+                        <th>Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {usersToApprove.map((user) => (
+                        <tr key={user.id}>
+                            <td>{user.type === "applicant" ? user.name : user.companyName}</td>
+                            <td>{user.email}</td>
+                            <td>{user.type}</td>
+                            <td>
+                                <button onClick={() => handleApproveUser(user)}>Approve</button>
+                                <button onClick={() => handleRejectUser(user)}>Reject</button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    )}
+      {/* <div style={{ marginTop: "20px" }}>
+   
+</div> */}
+
+{showDeletedFiles && (
+    <div>
+        <h2>Deleted Files</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name/Company</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {deletedFiles.map((file) => (
+                    <tr key={file.id}>
+                        <td>{file.type === "applicant" ? file.name : file.companyName}</td>
+                        <td>{file.email}</td>
+                        <td>{file.type}</td>
+                        <td>{file.reason || "N/A"}</td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+)}
+
     </>
   );
 };

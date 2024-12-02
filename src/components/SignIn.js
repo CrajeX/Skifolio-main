@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
 
 const SignIn = () => {
     const [email, setEmail] = useState('');
@@ -17,9 +18,18 @@ const SignIn = () => {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);
             const user = userCredential.user;
 
-            // Fetch user data from Firestore to determine if they are an applicant or employer
+            // Fetch user data from Firestore to check approval status
             const applicantDoc = await getDoc(doc(db, 'applicants', user.uid));
             const employerDoc = await getDoc(doc(db, 'employers', user.uid));
+            const userDocToBeApproved = await getDoc(doc(db, 'userAccountsToBeApproved', user.uid));
+
+            // Check if the user is in the 'userAccountsToBeApproved' collection (pending approval)
+            if (userDocToBeApproved.exists()) {
+                alert('Your account is pending approval. Please wait for admin approval.');
+                await signOut(auth); // Log out the user
+                navigate('/'); // Redirect to homepage
+                return;
+            }
 
             if (applicantDoc.exists()) {
                 // Redirect to applicant profile if user is found in applicants collection
@@ -28,10 +38,10 @@ const SignIn = () => {
                 // Redirect to employer profile if user is found in employers collection
                 navigate('/employer/profile');
             } else {
-                console.error("User type not found in database.");
+                console.error('User type not found in database.');
             }
         } catch (error) {
-            console.error("Error signing in:", error);
+            console.error('Error signing in:', error);
         }
     };
 
