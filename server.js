@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors({
-    origin: 'https://casestudynapoles.netlify.app',
+    origin: 'https://skifolio.netlify.app',
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
 }));

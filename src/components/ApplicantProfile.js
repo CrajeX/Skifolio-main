@@ -12,6 +12,7 @@ const ApplicantProfile = () => {
         HTML: [],
         CSS: [],
         JavaScript: [],
+        Others:[],
     });
     const [selectedSkill, setSelectedSkill] = useState('HTML');
 
@@ -34,6 +35,7 @@ const ApplicantProfile = () => {
                         HTML: Array.isArray(data.certifications?.HTML) ? data.certifications.HTML : [],
                         CSS: Array.isArray(data.certifications?.CSS) ? data.certifications.CSS : [],
                         JavaScript: Array.isArray(data.certifications?.JavaScript) ? data.certifications.JavaScript : [],
+                        Others: Array.isArray(data.certifications?.Others) ? data.certifications.Others : [],
                     });
                 }
             } catch (error) {
@@ -186,22 +188,24 @@ const ApplicantProfile = () => {
                 </div>
             </div>
              {/* Badges */}
-             <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+             <div style={{ marginTop: '20px', display: 'flex', gap: '10px',marginLeft: "10px" }}>
                 {Object.keys(certifications).map((skill) =>
-                    certifications[skill]?.length > 0 ? (
-                        <span key={skill} style={{
-                            backgroundColor: '#4CAF50',
-                            color: 'white',
-                            padding: '5px 10px',
-                            borderRadius: '5px',
-                            fontSize: '12px'
-                        }}>
+                    skill !== "Others" && certifications[skill]?.length > 0 ? ( // Exclude "Others"
+                        <span
+                            key={skill}
+                            style={{
+                                backgroundColor: '#4CAF50',
+                                color: 'white',
+                                padding: '5px 10px',
+                                borderRadius: '5px',
+                                fontSize: '12px',
+                            }}
+                        >
                             {skill} Certified
                         </span>
                     ) : null
                 )}
             </div>
-
             {/* Resume */}
             <div style={{ marginTop: '20px' }} id='Resume'>
                 <h4>Resume</h4>
