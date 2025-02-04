@@ -20,17 +20,44 @@ const JobSearch = () => {
                 }
             }
         };
+        const quickSort = (arr, depth = 0) => {
+            if (arr.length <= 1) {
+                console.log(`Depth ${depth}: Returning`, arr.map(job => job.averageScore));
+                return arr;
+            }
         
+            const pivot = arr[arr.length - 1];
+            const left = [];
+            const right = [];
+        
+            for (let i = 0; i < arr.length - 1; i++) {
+                if (arr[i].averageScore >= pivot.averageScore) {
+                    left.push(arr[i]);
+                } else {
+                    right.push(arr[i]);
+                }
+            }
+        
+            console.log(`Depth ${depth}: Pivot = ${pivot.averageScore}, Left = [${left.map(job => job.averageScore)}], Right = [${right.map(job => job.averageScore)}]`);
+        
+            return [...quickSort(left, depth + 1), pivot, ...quickSort(right, depth + 1)];
+        };
         const fetchJobs = async () => {
             const jobsCollection = collection(db, "jobs");
             const jobSnapshot = await getDocs(jobsCollection);
-
-            const jobList = jobSnapshot.docs.map((doc) => ({
+    
+            let jobList = jobSnapshot.docs.map((doc) => ({
                 id: doc.id,
                 ...doc.data(),
                 averageScore: parseFloat(doc.data().averageScore || 0),
             }));
-
+    
+            console.log("Before sorting:", jobList.map(job => job.averageScore));
+    
+            jobList = quickSort(jobList); // Sort before setting state
+    
+            console.log("After sorting:", jobList.map(job => job.averageScore));
+    
             setJobs(jobList);
             setFilteredJobs(jobList);
         };
