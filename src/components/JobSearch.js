@@ -151,7 +151,9 @@ const JobSearch = () => {
                     transition: "filter 0.3s ease-in-out",
                 }}
             >
-                <h2>Search Jobs</h2>
+                <h2 style={{ marginTop: '-20px' }}>Search Jobs</h2>
+
+
                 <input
                     type="text"
                     placeholder="Search for jobs..."

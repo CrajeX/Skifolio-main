@@ -134,12 +134,16 @@ const Portfolio = () => {
             }
         }
     };
-
+    var link = document.createElement('link');
+    link.setAttribute('rel', 'stylesheet');
+    link.setAttribute('type', 'text/css');
+    link.setAttribute('href', 'https://fonts.googleapis.com/css2?family=Gothic+A1&family=Roboto+Slab:wght@100..900&display=swap');
+    document.head.appendChild(link);
     return (
         <div style={{ padding: '20px' }} id='portfolio'>
-            <h3>Portfolio</h3>
+            <h2 style={{ marginTop: '-30px' }}>Portfolio</h2>
             {userData && (
-                <p>
+                <p style={{ fontSize: '1.5rem', fontFamily:'Roboto Slab' }}>
                     GitHub: <a href={userData.githubLink} target="_blank" rel="noopener noreferrer">{userData.githubLink}</a>
                 </p>
             )}

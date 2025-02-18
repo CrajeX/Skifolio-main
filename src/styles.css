@@ -877,3 +877,10 @@ footer.show .admin-btn {
 
 /* Show the dropdown menu (use JS to add this class to the .dropdown-content container when the user clicks on the dropdown button) */
 .show {display:block;}
+
+/* FONTS */
+.gothic-a1-regular {
+  font-family: "Gothic A1", serif;
+  font-weight: 400;
+  font-style: normal;
+}
