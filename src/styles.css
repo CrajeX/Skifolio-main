@@ -139,7 +139,7 @@ img{
     align-items: center;
     cursor: pointer;
     text-transform: uppercase;
-    background-color: #fff;
+    background-color: #17252a;
     border: 1px solid rgba(22, 76, 167, 0.6);
     border-radius: 10px;
     color: #1d89ff;
@@ -151,7 +151,7 @@ img{
   }
   
   .Roles button span {
-    color: #164ca7;
+    color: #ffffff;
     font-size: 14px;
     font-weight: 500;
     letter-spacing: 0.7px;
@@ -537,7 +537,7 @@ nav a {
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  /* background-color: #f7f7f7; */
+  background-color: #3aafa9   ;
 }
 
   .hero h1, .hero p {
@@ -561,7 +561,7 @@ nav a {
     box-shadow: inset 6px 6px 8px rgba(97, 97, 97, 0.075),
       6px 6px 6px rgba(255, 255, 255, 0.781);
     outline: none;
-    background-color: inherit;
+    background-color: #17252a;
     color: rgb(161, 161, 161);
     font-size: inherit;
   }
@@ -569,8 +569,8 @@ nav a {
   .submit, .btn {
     margin-top: 20px;
     font-weight: bold;
-    box-shadow: -3px -3px 5px white, 3px 3px 5px rgba(209, 209, 209, 0.705);
-    color: rgb(0, 0, 0);
+    box-shadow: -3px -3px 5px #2e74d6, 3px 3px 5px #173b6f;
+    color: rgb(255, 255, 255);
     cursor: pointer;
     text-align: center; /* Center the text inside buttons */
     display: inline-block; /* Ensures buttons align properly */

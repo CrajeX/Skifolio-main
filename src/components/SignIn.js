@@ -56,7 +56,7 @@ const SignIn = () => {
                                 background: 'none',
                                 border: 'none',
                                 cursor: 'pointer',
-                                color: 'black',
+                                color: 'white',
                             }}
                         >
                             {showPassword ? 'Hide' : 'Show'}
