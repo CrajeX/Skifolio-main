@@ -166,7 +166,7 @@ const JobSearch = () => {
                     }}
                 />
 
-                <div>
+                {/* <div>
                     <h3>Highest Eligible Jobs</h3>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
                         {highestEligibleJobs.map((job) => (
@@ -188,7 +188,33 @@ const JobSearch = () => {
                             </div>
                         ))}
                     </div>
+                </div> */}
+                <div>
+    <h3>Highest Eligible Jobs</h3>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
+        {highestEligibleJobs
+            .slice() // Creates a shallow copy to avoid mutating the original array
+            .sort((a, b) => a.title.localeCompare(b.title)) // Sorts alphabetically by job title
+            .map((job) => (
+                <div
+                    key={job.id}
+                    style={{
+                        border: "1px solid #ddd",
+                        borderRadius: "8px",
+                        padding: "10px",
+                        width: "200px",
+                        cursor: "pointer",
+                        background: "#fff",
+                    }}
+                    onClick={() => setExpandedJob(job)}
+                >
+                    <h4>{job.title}</h4>
+                    <p><strong>Company:</strong> {job.companyName}</p>
+                    <p><strong>Location:</strong> {job.location}</p>
                 </div>
+            ))}
+    </div>
+</div>
 
                 <div>
                     <h3>All Jobs</h3>

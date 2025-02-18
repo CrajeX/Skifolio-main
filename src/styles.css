@@ -144,7 +144,7 @@ img{
     border-radius: 10px;
     color: #1d89ff;
     font-weight: 400;
-    font-family: inherit;
+    font-family: Arial, Helvetica, sans-serif;
     z-index: 0;
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.02, 0.01, 0.47, 1);
@@ -520,6 +520,7 @@ nav a {
     height: 100%; /* Adjust as needed */
     width: 50vw;
     position: relative; /* Allows child elements to be positioned absolutely */
+    font-family: 'Times New Roman', Times, serif;
 }
 
 .choicecontainer {
@@ -527,6 +528,7 @@ nav a {
     height: 100%; /* Adjust as needed */
     width: 50vw;
     position: relative; /* Allows child elements to be positioned absolutely */
+    font-family: 'Times New Roman', Times, serif;
 }
   
 .hero {
@@ -831,3 +833,47 @@ footer.show .admin-btn {
   max-height: 70%;
   overflow-y: auto;
 }
+/* DROPDOWN SORTING */
+.dropbtn {
+  background-color: #3498DB;
+  color: white;
+  padding: 16px;
+  font-size: 16px;
+  border: none;
+  cursor: pointer;
+}
+
+/* Dropdown button on hover & focus */
+.dropbtn:hover, .dropbtn:focus {
+  background-color: #2980B9;
+}
+
+/* The container <div> - needed to position the dropdown content */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+/* Dropdown Content (Hidden by Default) */
+.dropdown-content {
+  display: none;
+  position: absolute;
+  background-color: #f1f1f1;
+  min-width: 160px;
+  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  z-index: 1;
+}
+
+/* Links inside the dropdown */
+.dropdown-content a {
+  color: black;
+  padding: 12px 16px;
+  text-decoration: none;
+  display: block;
+}
+
+/* Change color of dropdown links on hover */
+.dropdown-content a:hover {background-color: #ddd;}
+
+/* Show the dropdown menu (use JS to add this class to the .dropdown-content container when the user clicks on the dropdown button) */
+.show {display:block;}
