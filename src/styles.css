@@ -981,3 +981,17 @@ footer.show .admin-btn {
 
 
 /* END OF CHANGED EXCLAMATION POINT JOB POST CSS */
+
+
+/*
+Verification Email Style
+*/
+#emailverify{
+  top: 30%;
+  position: absolute;
+  background-color: rgb(245, 245, 245);
+  height: fit-content;
+  width: fit-content;
+  border-radius: 20px;
+  box-shadow: #000000;
+}
