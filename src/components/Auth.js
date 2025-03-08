@@ -373,6 +373,438 @@
 
 // export default Auth;
 
+
+// WORKING MARCH 8 2025 --------------------------------------------------------------------------------------------
+// import React, { useState } from 'react';
+// import { auth, db, storage } from '../firebase';
+// import { useNavigate } from 'react-router-dom';
+// import { 
+//     createUserWithEmailAndPassword, 
+//     signInWithEmailAndPassword, 
+//     signOut, 
+//     sendEmailVerification 
+// } from 'firebase/auth';
+// import { doc, setDoc, getDoc } from 'firebase/firestore';
+// import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+// const Auth = ({ userType, setUser }) => {
+//     const [email, setEmail] = useState('');
+//     const [password, setPassword] = useState('');
+//     const [showPassword, setShowPassword] = useState(false);
+//     const [name, setName] = useState('');
+//     const [githubLink, setGithubLink] = useState('');
+//     const [companyName, setCompanyName] = useState('');
+//     const [businessPermit, setBusinessPermit] = useState(null);
+//     const [isSignUp, setIsSignUp] = useState(true);
+//     const [agreedToTerms, setAgreedToTerms] = useState(false);
+//     const navigate = useNavigate();
+
+//     const handleSubmit = async (e) => {
+//         e.preventDefault();
+
+//         if (isSignUp && !agreedToTerms) {
+//             alert('Please accept the terms and conditions.');
+//             return;
+//         }
+
+//         try {
+//             let userCredential;
+
+//             if (isSignUp) {
+//                 // **Sign-Up Logic**
+//                 userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+//                 // **Send verification email**
+//                 await sendEmailVerification(userCredential.user);
+//                 alert('A verification email has been sent. Please verify before signing in.');
+
+//                 // **Upload business permit if employer**
+//                 let businessPermitURL = null;
+//                 if (userType === 'employer' && businessPermit) {
+//                     const storageRef = ref(storage, `businessPermits/${userCredential.user.uid}`);
+//                     await uploadBytes(storageRef, businessPermit);
+//                     businessPermitURL = await getDownloadURL(storageRef);
+//                 }
+
+//                 // **Save user data**
+//                 const userData = {
+//                     email,
+//                     type: userType,
+//                     status: 'pending',
+//                     name: userType === 'applicant' ? name : null,
+//                     githubLink: userType === 'applicant' ? githubLink : null,
+//                     companyName: userType === 'employer' ? companyName : null,
+//                     businessPermit: userType === 'employer' ? businessPermitURL : null
+//                 };
+
+//                 await setDoc(doc(db, 'userAccountsToApprove', userCredential.user.uid), userData);
+//                 await setDoc(doc(db, 'userAccountsToBeApproved', userCredential.user.uid), userData);
+
+//                 // **Log out after sign-up**
+//                 await signOut(auth);
+//                 navigate('/');
+//                 return;
+//             } else {
+//                 // **Sign-In Logic**
+//                 userCredential = await signInWithEmailAndPassword(auth, email, password);
+//                 const user = userCredential.user;
+
+//                 // **Check if email is verified**
+//                 if (!user.emailVerified) {
+//                     alert('Please verify your email before signing in.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 const uid = user.uid;
+//                 const userDocToApprove = await getDoc(doc(db, 'userAccountsToApprove', uid));
+//                 const userDocToBeApproved = await getDoc(doc(db, 'userAccountsToBeApproved', uid));
+
+//                 if (!userDocToApprove.exists()) {
+//                     alert('Your account is not found. Please sign up.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 const userData = userDocToApprove.data();
+
+//                 // **Check if user is pending approval**
+//                 if (userDocToBeApproved.exists()) {
+//                     alert('Your account is pending approval. Please wait for admin approval.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 // **Check if account is approved**
+//                 if (userData.status !== 'approved') {
+//                     alert('Your account is not yet approved. Please wait for admin approval.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 // **Login successful**
+//                 setUser(user);
+//                 navigate(userData.type === 'employer' ? '/employer/profile' : '/applicant/profile');
+//             }
+//         } catch (error) {
+//             console.error('Error signing in/up:', error);
+//             alert('An error occurred. Please try again.');
+//         }
+//     };
+
+//     return (
+//         <div className="hero" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+//             <div className="choicecontainer2" style={{ textAlign: 'center', width: '100%', maxWidth: '400px' }}>
+//                 <form onSubmit={handleSubmit} id="formauth" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+//                     <h2 style={{ fontFamily: "times new roman" }}>{isSignUp ? 'Sign Up' : 'Sign In'} as {userType}</h2>
+
+//                     <input
+//                         className="input"
+//                         type="email"
+//                         placeholder="Email"
+//                         value={email}
+//                         onChange={(e) => setEmail(e.target.value)}
+//                         required
+//                         style={{ marginBottom: '10px', width: '100%' }}
+//                     />
+//                     <div style={{ position: 'relative', width: '100%', marginBottom: '10px' }}>
+//                         <input
+//                             className="input"
+//                             type={showPassword ? 'text' : 'password'}
+//                             placeholder="Password"
+//                             value={password}
+//                             onChange={(e) => setPassword(e.target.value)}
+//                             required
+//                             style={{ width: '100%' }}
+//                         />
+//                         <button
+//                             type="button"
+//                             onClick={() => setShowPassword(!showPassword)}
+//                             style={{
+//                                 position: 'absolute',
+//                                 right: '10px',
+//                                 top: '50%',
+//                                 transform: 'translateY(-50%)',
+//                                 background: 'none',
+//                                 border: 'none',
+//                                 cursor: 'pointer',
+//                                 color: 'black',
+//                             }}
+//                         >
+//                             {showPassword ? 'Hide' : 'Show'}
+//                         </button>
+//                     </div>
+
+//                     {isSignUp && userType === 'applicant' && (
+//                         <>
+//                             <input
+//                                 className="input"
+//                                 type="text"
+//                                 placeholder="Full Name"
+//                                 value={name}
+//                                 onChange={(e) => setName(e.target.value)}
+//                                 required
+//                                 style={{ marginBottom: '10px', width: '100%' }}
+//                             />
+//                             <input
+//                                 className="input"
+//                                 type="text"
+//                                 placeholder="GitHub Profile Link"
+//                                 value={githubLink}
+//                                 onChange={(e) => setGithubLink(e.target.value)}
+//                                 style={{ marginBottom: '10px', width: '100%' }}
+//                             />
+//                         </>
+//                     )}
+
+//                     {isSignUp && userType === 'employer' && (
+//                         <>
+//                             <input
+//                                 className="input"
+//                                 type="text"
+//                                 placeholder="Company Name"
+//                                 value={companyName}
+//                                 onChange={(e) => setCompanyName(e.target.value)}
+//                                 required
+//                                 style={{ marginBottom: '10px', width: '100%' }}
+//                             />
+//                             <input
+//                                 className="input"
+//                                 type="file"
+//                                 onChange={(e) => setBusinessPermit(e.target.files[0])}
+//                                 required
+//                                 style={{ marginBottom: '10px', width: '100%' }}
+//                             />
+//                         </>
+//                     )}
+
+//                     <div style={{ marginBottom: '20px' }}>
+//                         <input
+//                             type="checkbox"
+//                             checked={agreedToTerms}
+//                             onChange={(e) => setAgreedToTerms(e.target.checked)}
+//                             style={{ marginRight: '5px' }}
+//                         />
+//                         <label>
+//                             I agree to the <a href="https://www.termsandconditionsgenerator.com/" target="_blank" rel="noopener noreferrer">Terms and Conditions</a>
+//                         </label>
+//                     </div>
+
+//                     <button type="submit" className="input submit">
+//                         {isSignUp ? 'Sign Up' : 'Sign In'}
+//                     </button>
+//                 </form>
+//             </div>
+//         </div>
+//     );
+// };
+
+// export default Auth;
+
+
+// WORKING FORGOT PASSWRD----------------------------------------------------------------------------
+
+// import React, { useState } from 'react';
+// import { auth, db, storage } from '../firebase';
+// import { useNavigate } from 'react-router-dom';
+// import { 
+//     createUserWithEmailAndPassword, 
+//     signInWithEmailAndPassword, 
+//     signOut, 
+//     sendEmailVerification,
+//     sendPasswordResetEmail
+// } from 'firebase/auth';
+// import { doc, setDoc, getDoc } from 'firebase/firestore';
+// import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+// const Auth = ({ userType, setUser }) => {
+//     const [email, setEmail] = useState('');
+//     const [password, setPassword] = useState('');
+//     const [showPassword, setShowPassword] = useState(false);
+//     const [name, setName] = useState('');
+//     const [githubLink, setGithubLink] = useState('');
+//     const [companyName, setCompanyName] = useState('');
+//     const [businessPermit, setBusinessPermit] = useState(null);
+//     const [isSignUp, setIsSignUp] = useState(true);
+//     const [agreedToTerms, setAgreedToTerms] = useState(false);
+//     const [resetEmail, setResetEmail] = useState('');
+//     const navigate = useNavigate();
+
+//     const handleSubmit = async (e) => {
+//         e.preventDefault();
+
+//         if (isSignUp && !agreedToTerms) {
+//             alert('Please accept the terms and conditions.');
+//             return;
+//         }
+
+//         try {
+//             let userCredential;
+
+//             if (isSignUp) {
+//                 userCredential = await createUserWithEmailAndPassword(auth, email, password);
+//                 await sendEmailVerification(userCredential.user);
+//                 alert('A verification email has been sent. Please verify before signing in.');
+
+//                 let businessPermitURL = null;
+//                 if (userType === 'employer' && businessPermit) {
+//                     const storageRef = ref(storage, `businessPermits/${userCredential.user.uid}`);
+//                     await uploadBytes(storageRef, businessPermit);
+//                     businessPermitURL = await getDownloadURL(storageRef);
+//                 }
+
+//                 const userData = {
+//                     email,
+//                     type: userType,
+//                     status: 'pending',
+//                     name: userType === 'applicant' ? name : null,
+//                     githubLink: userType === 'applicant' ? githubLink : null,
+//                     companyName: userType === 'employer' ? companyName : null,
+//                     businessPermit: userType === 'employer' ? businessPermitURL : null
+//                 };
+
+//                 await setDoc(doc(db, 'userAccountsToApprove', userCredential.user.uid), userData);
+//                 await setDoc(doc(db, 'userAccountsToBeApproved', userCredential.user.uid), userData);
+
+//                 await signOut(auth);
+//                 navigate('/');
+//                 return;
+//             } else {
+//                 userCredential = await signInWithEmailAndPassword(auth, email, password);
+//                 const user = userCredential.user;
+
+//                 if (!user.emailVerified) {
+//                     alert('Please verify your email before signing in.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 const uid = user.uid;
+//                 const userDocToApprove = await getDoc(doc(db, 'userAccountsToApprove', uid));
+//                 const userDocToBeApproved = await getDoc(doc(db, 'userAccountsToBeApproved', uid));
+
+//                 if (!userDocToApprove.exists()) {
+//                     alert('Your account is not found. Please sign up.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 const userData = userDocToApprove.data();
+
+//                 if (userDocToBeApproved.exists()) {
+//                     alert('Your account is pending approval. Please wait for admin approval.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 if (userData.status !== 'approved') {
+//                     alert('Your account is not yet approved. Please wait for admin approval.');
+//                     await signOut(auth);
+//                     navigate('/');
+//                     return;
+//                 }
+
+//                 setUser(user);
+//                 navigate(userData.type === 'employer' ? '/employer/profile' : '/applicant/profile');
+//             }
+//         } catch (error) {
+//             console.error('Error signing in/up:', error);
+//             alert('An error occurred. Please try again.');
+//         }
+//     };
+
+//     const handleForgotPassword = async () => {
+//         if (!resetEmail) {
+//             alert('Please enter your email to reset the password.');
+//             return;
+//         }
+//         try {
+//             await sendPasswordResetEmail(auth, resetEmail);
+//             alert('Password reset email sent. Please check your inbox.');
+//         } catch (error) {
+//             console.error('Error sending password reset email:', error);
+//             alert('Error sending password reset email. Please try again.');
+//         }
+//     };
+
+//     return (
+//         <div className="hero" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+//             <div className="choicecontainer2" style={{ textAlign: 'center', width: '100%', maxWidth: '400px' }}>
+//                 <form onSubmit={handleSubmit} id="formauth" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+//                     <h2 style={{ fontFamily: "times new roman" }}>{isSignUp ? 'Sign Up' : 'Sign In'} as {userType}</h2>
+
+//                     <input
+//                         className="input"
+//                         type="email"
+//                         placeholder="Email"
+//                         value={email}
+//                         onChange={(e) => setEmail(e.target.value)}
+//                         required
+//                         style={{ marginBottom: '10px', width: '100%' }}
+//                     />
+//                     <div style={{ position: 'relative', width: '100%', marginBottom: '10px' }}>
+//                         <input
+//                             className="input"
+//                             type={showPassword ? 'text' : 'password'}
+//                             placeholder="Password"
+//                             value={password}
+//                             onChange={(e) => setPassword(e.target.value)}
+//                             required
+//                             style={{ width: '100%' }}
+//                         />
+//                         <button
+//                             type="button"
+//                             onClick={() => setShowPassword(!showPassword)}
+//                             style={{
+//                                 position: 'absolute',
+//                                 right: '10px',
+//                                 top: '50%',
+//                                 transform: 'translateY(-50%)',
+//                                 background: 'none',
+//                                 border: 'none',
+//                                 cursor: 'pointer',
+//                                 color: 'black',
+//                             }}
+//                         >
+//                             {showPassword ? 'Hide' : 'Show'}
+//                         </button>
+//                     </div>
+
+//                     <button type="submit" className="input submit">
+//                         {isSignUp ? 'Sign Up' : 'Sign In'}
+//                     </button>
+
+//                     {/* Forgot Password Section */}
+//                     {!isSignUp && (
+//                         <div style={{ marginTop: '10px', textAlign: 'center' }}>
+//                             <input
+//                                 type="email"
+//                                 placeholder="Enter email for password reset"
+//                                 value={resetEmail}
+//                                 onChange={(e) => setResetEmail(e.target.value)}
+//                                 style={{ width: '100%', marginBottom: '10px' }}
+//                             />
+//                             <button type="button" onClick={handleForgotPassword} style={{ background: 'none', border: 'none', color: 'blue', cursor: 'pointer' }}>
+//                                 Forgot Password?
+//                             </button>
+//                         </div>
+//                     )}
+//                 </form>
+//             </div>
+//         </div>
+//     );
+// };
+
+// export default Auth;
+
+
 import React, { useState } from 'react';
 import { auth, db, storage } from '../firebase';
 import { useNavigate } from 'react-router-dom';
@@ -380,7 +812,8 @@ import {
     createUserWithEmailAndPassword, 
     signInWithEmailAndPassword, 
     signOut, 
-    sendEmailVerification 
+    sendEmailVerification, 
+    sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -395,6 +828,7 @@ const Auth = ({ userType, setUser }) => {
     const [businessPermit, setBusinessPermit] = useState(null);
     const [isSignUp, setIsSignUp] = useState(true);
     const [agreedToTerms, setAgreedToTerms] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
@@ -409,14 +843,10 @@ const Auth = ({ userType, setUser }) => {
             let userCredential;
 
             if (isSignUp) {
-                // **Sign-Up Logic**
                 userCredential = await createUserWithEmailAndPassword(auth, email, password);
-
-                // **Send verification email**
                 await sendEmailVerification(userCredential.user);
                 alert('A verification email has been sent. Please verify before signing in.');
 
-                // **Upload business permit if employer**
                 let businessPermitURL = null;
                 if (userType === 'employer' && businessPermit) {
                     const storageRef = ref(storage, `businessPermits/${userCredential.user.uid}`);
@@ -424,7 +854,6 @@ const Auth = ({ userType, setUser }) => {
                     businessPermitURL = await getDownloadURL(storageRef);
                 }
 
-                // **Save user data**
                 const userData = {
                     email,
                     type: userType,
@@ -438,16 +867,13 @@ const Auth = ({ userType, setUser }) => {
                 await setDoc(doc(db, 'userAccountsToApprove', userCredential.user.uid), userData);
                 await setDoc(doc(db, 'userAccountsToBeApproved', userCredential.user.uid), userData);
 
-                // **Log out after sign-up**
                 await signOut(auth);
                 navigate('/');
                 return;
             } else {
-                // **Sign-In Logic**
                 userCredential = await signInWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
 
-                // **Check if email is verified**
                 if (!user.emailVerified) {
                     alert('Please verify your email before signing in.');
                     await signOut(auth);
@@ -468,7 +894,6 @@ const Auth = ({ userType, setUser }) => {
 
                 const userData = userDocToApprove.data();
 
-                // **Check if user is pending approval**
                 if (userDocToBeApproved.exists()) {
                     alert('Your account is pending approval. Please wait for admin approval.');
                     await signOut(auth);
@@ -476,7 +901,6 @@ const Auth = ({ userType, setUser }) => {
                     return;
                 }
 
-                // **Check if account is approved**
                 if (userData.status !== 'approved') {
                     alert('Your account is not yet approved. Please wait for admin approval.');
                     await signOut(auth);
@@ -484,7 +908,6 @@ const Auth = ({ userType, setUser }) => {
                     return;
                 }
 
-                // **Login successful**
                 setUser(user);
                 navigate(userData.type === 'employer' ? '/employer/profile' : '/applicant/profile');
             }
@@ -494,107 +917,65 @@ const Auth = ({ userType, setUser }) => {
         }
     };
 
+    const handleForgotPassword = async () => {
+        if (!resetEmail) {
+            alert('Please enter your email to reset the password.');
+            return;
+        }
+        try {
+            await sendPasswordResetEmail(auth, resetEmail);
+            alert('Password reset email sent. Please check your inbox.');
+        } catch (error) {
+            console.error('Error sending password reset email:', error);
+            alert('Error sending password reset email. Please try again.');
+        }
+    };
+
     return (
         <div className="hero" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
             <div className="choicecontainer2" style={{ textAlign: 'center', width: '100%', maxWidth: '400px' }}>
                 <form onSubmit={handleSubmit} id="formauth" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <h2 style={{ fontFamily: "times new roman" }}>{isSignUp ? 'Sign Up' : 'Sign In'} as {userType}</h2>
 
-                    <input
-                        className="input"
-                        type="email"
-                        placeholder="Email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                        style={{ marginBottom: '10px', width: '100%' }}
-                    />
+                    <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ marginBottom: '10px', width: '100%' }} />
+                    
                     <div style={{ position: 'relative', width: '100%', marginBottom: '10px' }}>
-                        <input
-                            className="input"
-                            type={showPassword ? 'text' : 'password'}
-                            placeholder="Password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                            style={{ width: '100%' }}
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            style={{
-                                position: 'absolute',
-                                right: '10px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                color: 'black',
-                            }}
-                        >
+                        <input className="input" type={showPassword ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ width: '100%' }} />
+                        <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'black' }}>
                             {showPassword ? 'Hide' : 'Show'}
                         </button>
                     </div>
 
                     {isSignUp && userType === 'applicant' && (
                         <>
-                            <input
-                                className="input"
-                                type="text"
-                                placeholder="Full Name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                required
-                                style={{ marginBottom: '10px', width: '100%' }}
-                            />
-                            <input
-                                className="input"
-                                type="text"
-                                placeholder="GitHub Profile Link"
-                                value={githubLink}
-                                onChange={(e) => setGithubLink(e.target.value)}
-                                style={{ marginBottom: '10px', width: '100%' }}
-                            />
+                            <input className="input" type="text" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} required style={{ marginBottom: '10px', width: '100%' }} />
+                            <input className="input" type="text" placeholder="GitHub Link" value={githubLink} onChange={(e) => setGithubLink(e.target.value)} required style={{ marginBottom: '10px', width: '100%' }} />
                         </>
                     )}
 
                     {isSignUp && userType === 'employer' && (
                         <>
-                            <input
-                                className="input"
-                                type="text"
-                                placeholder="Company Name"
-                                value={companyName}
-                                onChange={(e) => setCompanyName(e.target.value)}
-                                required
-                                style={{ marginBottom: '10px', width: '100%' }}
-                            />
-                            <input
-                                className="input"
-                                type="file"
-                                onChange={(e) => setBusinessPermit(e.target.files[0])}
-                                required
-                                style={{ marginBottom: '10px', width: '100%' }}
-                            />
+                            <input className="input" type="text" placeholder="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required style={{ marginBottom: '10px', width: '100%' }} />
+                            <input className="input" type="file" accept=".pdf,.jpg,.png" onChange={(e) => setBusinessPermit(e.target.files[0])} required style={{ marginBottom: '10px', width: '100%' }} />
                         </>
                     )}
 
-                    <div style={{ marginBottom: '20px' }}>
-                        <input
-                            type="checkbox"
-                            checked={agreedToTerms}
-                            onChange={(e) => setAgreedToTerms(e.target.checked)}
-                            style={{ marginRight: '5px' }}
-                        />
-                        <label>
-                            I agree to the <a href="https://www.termsandconditionsgenerator.com/" target="_blank" rel="noopener noreferrer">Terms and Conditions</a>
-                        </label>
-                    </div>
+                    {isSignUp && (
+                        <div style={{ marginBottom: '20px' }}>
+                            <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)} style={{ marginRight: '5px' }} />
+                            <label>
+                                I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms and Conditions</a>
+                            </label>
+                        </div>
+                    )}
 
-                    <button type="submit" className="input submit">
-                        {isSignUp ? 'Sign Up' : 'Sign In'}
-                    </button>
+                    <button type="submit" className="input submit">{isSignUp ? 'Sign Up' : 'Sign In'}</button>
+
+                    {!isSignUp && (
+                        <button type="button" onClick={handleForgotPassword} style={{ background: 'none', border: 'none', color: 'blue', cursor: 'pointer', marginTop: '10px' }}>
+                            Forgot Password?
+                        </button>
+                    )}
                 </form>
             </div>
         </div>
