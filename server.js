@@ -20,8 +20,7 @@ const fetchRepoFiles = async (owner, repo, branch = 'main') => {
 
     try {
         const { data } = await axios.get(apiUrl);
-        const files = data.tree.filter(file => file.type === "blob");
-        return files;
+        return data.tree.filter(file => file.type === "blob");
     } catch (error) {
         console.error(`Failed to fetch repo files: ${error.message}`);
         return [];
@@ -75,7 +74,8 @@ const evaluateJavaScript = async (jsContent) => {
     return { score: Math.max(score, 0), feedback };
 };
 
-app.post('/analyze-github', async (req, res) => {
+// ✅ Corrected route: '/analyze' instead of '/analyze-github'
+app.post('/analyze', async (req, res) => {
     const { owner, repo, branch } = req.body;
 
     try {
