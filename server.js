@@ -3,7 +3,6 @@ const axios = require('axios');
 const { ESLint } = require('eslint');
 const csslint = require('csslint').CSSLint;
 const cors = require('cors');
-const cheerio = require('cheerio');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,67 +15,35 @@ app.use(cors({
 
 app.use(express.json());
 
-const fetchExternalFiles = async (links, baseURL) => {
-    const contents = [];
-    for (const link of links) {
-        try {
-            const url = new URL(link, baseURL).href; // Ensures absolute URL
-            console.log(`Attempting to fetch: ${url}`); // Log URL
-            const response = await axios.get(url, { timeout: 5000 });
-            
-            // Check if content exists
-            if (response.data && response.data.length > 0) {
-                contents.push(response.data);
-                console.log(`Fetched content from: ${url}`); // Confirm success
-            } else {
-                console.warn(`Empty content received from: ${url}`);
-            }
-        } catch (error) {
-            console.error(`Failed to fetch external file at ${link}:`, error.message);
-        }
+const fetchRepoFiles = async (owner, repo, branch = 'main') => {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+
+    try {
+        const { data } = await axios.get(apiUrl);
+        const files = data.tree.filter(file => file.type === "blob");
+        return files;
+    } catch (error) {
+        console.error(`Failed to fetch repo files: ${error.message}`);
+        return [];
     }
-    return contents.join('\n'); // Join all fetched content
 };
 
-// HTML evaluation with expanded checks
-const evaluateHTML = (htmlContent) => {
-    const feedback = [];
-    let score = 100;
-
-    // Semantic tags
-    const requiredTags = ['<header>', '<main>', '<footer>', '<title>', '<meta name="description">'];
-    requiredTags.forEach(tag => {
-        if (!new RegExp(tag).test(htmlContent)) {
-            score -= 10;
-            feedback.push(`Missing ${tag} for improved structure or SEO.`);
-        }
-    });
-
-    // Accessibility and deprecated tags
-    if (!/<img[^>]+alt="[^"]*"/.test(htmlContent)) {
-        score -= 10;
-        feedback.push("Images are missing alt attributes for accessibility.");
+const fetchFileContent = async (owner, repo, filePath, branch = 'main') => {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+    try {
+        const response = await axios.get(rawUrl, { timeout: 5000 });
+        return response.data;
+    } catch (error) {
+        console.error(`Failed to fetch file: ${filePath}`, error.message);
+        return "";
     }
-    if (/(<font>|<center>|<marquee>)/.test(htmlContent)) {
-        score -= 15;
-        feedback.push("Deprecated tags found (e.g., <font>, <center>); please remove.");
-    }
-
-    // HTML length and readability
-    const htmlLines = htmlContent.split('\n').length;
-    if (htmlLines > 200) {
-        score -= 5;
-        feedback.push("HTML file is large; consider splitting into partials.");
-    }
-
-    return { score, feedback };
 };
 
-// Enhanced CSS evaluation for modularity and best practices
+// CSS Evaluation
 const evaluateCSS = (cssContent) => {
     const results = csslint.verify(cssContent);
-    const feedback = [];
     let score = 100;
+    const feedback = [];
 
     results.messages.forEach(msg => {
         const severity = msg.type === 'warning' ? 1 : 2;
@@ -88,20 +55,16 @@ const evaluateCSS = (cssContent) => {
         score -= 10;
         feedback.push("Avoid using '!important' in CSS.");
     }
-    if (cssContent.length > 5000) {
-        score -= 10;
-        feedback.push("CSS file is large; consider modularizing styles.");
-    }
 
     return { score: Math.max(score, 0), feedback };
 };
 
-// Enhanced JavaScript evaluation
+// JavaScript Evaluation
 const evaluateJavaScript = async (jsContent) => {
     const eslint = new ESLint();
     const [result] = await eslint.lintText(jsContent);
-    const feedback = [];
     let score = 100;
+    const feedback = [];
 
     result.messages.forEach(msg => {
         const severity = msg.severity;
@@ -109,64 +72,47 @@ const evaluateJavaScript = async (jsContent) => {
         feedback.push(`${severity === 1 ? 'Warning' : 'Error'}: ${msg.message} at line ${msg.line}`);
     });
 
-    if (jsContent.split('\n').length > 400) {
-        score -= 10;
-        feedback.push("JavaScript file is large; consider modularizing.");
-    }
-    if ((jsContent.match(/console\./g) || []).length > 0) {
-        score -= 5;
-        feedback.push("Avoid using console logs in production code.");
-    }
-
     return { score: Math.max(score, 0), feedback };
 };
 
-app.post('/analyze', async (req, res) => {
-    const { url } = req.body;
+app.post('/analyze-github', async (req, res) => {
+    const { owner, repo, branch } = req.body;
 
     try {
-        const { status } = await axios.head(url);
-        if (status !== 200) {
-            return res.status(400).json({ error: "The provided URL is not reachable." });
+        const files = await fetchRepoFiles(owner, repo, branch);
+
+        const cssFiles = files.filter(file => file.path.endsWith('.css'));
+        const jsFiles = files.filter(file => file.path.endsWith('.js'));
+
+        let cssContent = "";
+        let jsContent = "";
+
+        for (const file of cssFiles) {
+            cssContent += await fetchFileContent(owner, repo, file.path, branch);
         }
 
-        const { data: htmlData } = await axios.get(url);
-        const $ = cheerio.load(htmlData);
+        for (const file of jsFiles) {
+            jsContent += await fetchFileContent(owner, repo, file.path, branch);
+        }
 
-        // HTML Analysis
-        const { score: htmlScore, feedback: htmlFeedback } = evaluateHTML(htmlData);
-        // CSS Analysis
-        const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
-        const inlineCSS = $('style').text();
-        const cssContent = inlineCSS + await fetchExternalFiles(cssLinks, url);
-        console.log("Combined CSS Content Length:", cssContent.length); // Log CSS content length
+        // Run Evaluations
         const { score: cssScore, feedback: cssFeedback } = evaluateCSS(cssContent);
-
-        // JavaScript Analysis
-        const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get();
-        const inlineJS = $('script:not([src])').text();
-        const jsContent = inlineJS + await fetchExternalFiles(jsLinks, url);
-        console.log("Combined JavaScript Content Length:", jsContent.length); // Log JS content length
         const { score: jsScore, feedback: jsFeedback } = await evaluateJavaScript(jsContent);
-
 
         res.json({
             scores: {
-                html: htmlScore,
                 css: cssScore,
                 javascript: jsScore,
             },
             feedback: {
-                html: htmlFeedback,
                 css: cssFeedback,
                 javascript: jsFeedback,
             }
         });
     } catch (error) {
-        console.error("Error fetching or analyzing the URL:", error.message);
-        res.status(500).json({ error: "Failed to analyze the live demo link." });
+        console.error("Error analyzing GitHub repo:", error.message);
+        res.status(500).json({ error: "Failed to analyze the GitHub repository." });
     }
 });
-
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
