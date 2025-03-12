@@ -3,115 +3,179 @@ const axios = require('axios');
 const { ESLint } = require('eslint');
 const csslint = require('csslint').CSSLint;
 const cors = require('cors');
-
+const cheerio = require('cheerio');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Updated CORS options to include both production and development environments
 app.use(cors({
     origin: ['https://skifolio.netlify.app', 'http://localhost:3000'], 
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
 }));
-
 app.use(express.json());
 
-const fetchRepoFiles = async (owner, repo, branch = 'main') => {
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-
-    try {
-        const { data } = await axios.get(apiUrl);
-        return data.tree.filter(file => file.type === "blob");
-    } catch (error) {
-        console.error(`Failed to fetch repo files: ${error.message}`);
-        return [];
+const fetchExternalFiles = async (links, baseURL) => {
+    const contents = [];
+    for (const link of links) {
+        try {
+            const url = new URL(link, baseURL).href; // Ensures absolute URL
+            console.log(`Attempting to fetch: ${url}`); // Log URL
+            const response = await axios.get(url, { timeout: 5000 });
+            
+            // Check if content exists
+            if (response.data && response.data.length > 0) {
+                contents.push(response.data);
+                console.log(`Fetched content from: ${url}`); // Confirm success
+            } else {
+                console.warn(`Empty content received from: ${url}`);
+            }
+        } catch (error) {
+            console.error(`Failed to fetch external file at ${link}:`, error.message);
+        }
     }
+    return contents.join('\n'); // Join all fetched content
 };
 
-const fetchFileContent = async (owner, repo, filePath, branch = 'main') => {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
-    try {
-        const response = await axios.get(rawUrl, { timeout: 5000 });
-        return response.data;
-    } catch (error) {
-        console.error(`Failed to fetch file: ${filePath}`, error.message);
-        return "";
+// HTML evaluation with expanded checks
+const evaluateHTML = (htmlContent) => {
+    const feedback = [];
+    let score = 100;
+    // Semantic tags
+    const requiredTags = ['<header>', '<main>', '<footer>', '<title>', '<meta name="description">'];
+    requiredTags.forEach(tag => {
+        if (!new RegExp(tag).test(htmlContent)) {
+            score -= 10;
+            feedback.push(`Missing ${tag} for improved structure or SEO.`);
+        }
+    });
+    // Accessibility and deprecated tags
+    if (!/<img[^>]+alt="[^"]*"/.test(htmlContent)) {
+        score -= 10;
+        feedback.push("Images are missing alt attributes for accessibility.");
     }
+    if (/(<font>|<center>|<marquee>)/.test(htmlContent)) {
+        score -= 15;
+        feedback.push("Deprecated tags found (e.g., <font>, <center>); please remove.");
+    }
+    // HTML length and readability
+    const htmlLines = htmlContent.split('\n').length;
+    if (htmlLines > 200) {
+        score -= 5;
+        feedback.push("HTML file is large; consider splitting into partials.");
+    }
+    return { score: Math.max(score, 0), feedback };
 };
 
-// CSS Evaluation
+// Enhanced CSS evaluation for modularity and best practices
 const evaluateCSS = (cssContent) => {
     const results = csslint.verify(cssContent);
-    let score = 100;
     const feedback = [];
-
+    let score = 100;
     results.messages.forEach(msg => {
         const severity = msg.type === 'warning' ? 1 : 2;
         score -= severity * 3;
         feedback.push(`${msg.type.toUpperCase()}: ${msg.message} at line ${msg.line}`);
     });
-
     if (cssContent.includes('!important')) {
         score -= 10;
         feedback.push("Avoid using '!important' in CSS.");
     }
-
+    if (cssContent.length > 5000) {
+        score -= 10;
+        feedback.push("CSS file is large; consider modularizing styles.");
+    }
     return { score: Math.max(score, 0), feedback };
 };
 
-// JavaScript Evaluation
+// Enhanced JavaScript evaluation
 const evaluateJavaScript = async (jsContent) => {
     const eslint = new ESLint();
     const [result] = await eslint.lintText(jsContent);
-    let score = 100;
     const feedback = [];
-
+    let score = 100;
     result.messages.forEach(msg => {
         const severity = msg.severity;
         score -= severity * 5;
         feedback.push(`${severity === 1 ? 'Warning' : 'Error'}: ${msg.message} at line ${msg.line}`);
     });
-
+    if (jsContent.split('\n').length > 400) {
+        score -= 10;
+        feedback.push("JavaScript file is large; consider modularizing.");
+    }
+    if ((jsContent.match(/console\./g) || []).length > 0) {
+        score -= 5;
+        feedback.push("Avoid using console logs in production code.");
+    }
     return { score: Math.max(score, 0), feedback };
 };
 
-// ✅ Corrected route: '/analyze' instead of '/analyze-github'
+// Updated endpoint to properly handle GitHub repository URLs
 app.post('/analyze', async (req, res) => {
-    const { owner, repo, branch } = req.body;
-
+    const { url } = req.body;
+    
     try {
-        const files = await fetchRepoFiles(owner, repo, branch);
-
-        const cssFiles = files.filter(file => file.path.endsWith('.css'));
-        const jsFiles = files.filter(file => file.path.endsWith('.js'));
-
-        let cssContent = "";
-        let jsContent = "";
-
-        for (const file of cssFiles) {
-            cssContent += await fetchFileContent(owner, repo, file.path, branch);
+        // Handle GitHub repository URLs
+        let demoUrl = url;
+        if (url.includes('github.com')) {
+            // Extract username and repo from GitHub URL
+            const parts = url.split('/');
+            const username = parts[parts.indexOf('github.com') + 1];
+            const repo = parts[parts.indexOf('github.com') + 2];
+            
+            // Check if GitHub Pages is available
+            demoUrl = `https://${username}.github.io/${repo}`;
+            console.log(`Attempting to access GitHub Pages: ${demoUrl}`);
+            
+            try {
+                await axios.head(demoUrl);
+            } catch (error) {
+                // Fall back to raw GitHub URL if GitHub Pages isn't available
+                console.log(`GitHub Pages not available. Using original URL: ${url}`);
+                demoUrl = url;
+            }
         }
-
-        for (const file of jsFiles) {
-            jsContent += await fetchFileContent(owner, repo, file.path, branch);
-        }
-
-        // Run Evaluations
+        
+        const { data: htmlData } = await axios.get(demoUrl);
+        const $ = cheerio.load(htmlData);
+        
+        // HTML Analysis
+        const { score: htmlScore, feedback: htmlFeedback } = evaluateHTML(htmlData);
+        
+        // CSS Analysis
+        const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
+        const inlineCSS = $('style').text();
+        const cssContent = inlineCSS + await fetchExternalFiles(cssLinks, demoUrl);
+        console.log("Combined CSS Content Length:", cssContent.length);
         const { score: cssScore, feedback: cssFeedback } = evaluateCSS(cssContent);
+        
+        // JavaScript Analysis
+        const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get();
+        const inlineJS = $('script:not([src])').text();
+        const jsContent = inlineJS + await fetchExternalFiles(jsLinks, demoUrl);
+        console.log("Combined JavaScript Content Length:", jsContent.length);
         const { score: jsScore, feedback: jsFeedback } = await evaluateJavaScript(jsContent);
-
+        
+        // Send the score and feedback data
         res.json({
             scores: {
-                css: cssScore,
-                javascript: jsScore,
+                html: Math.round(htmlScore),
+                css: Math.round(cssScore),
+                javascript: Math.round(jsScore),
             },
             feedback: {
+                html: htmlFeedback,
                 css: cssFeedback,
                 javascript: jsFeedback,
             }
         });
     } catch (error) {
-        console.error("Error analyzing GitHub repo:", error.message);
-        res.status(500).json({ error: "Failed to analyze the GitHub repository." });
+        console.error("Error fetching or analyzing the URL:", error.message);
+        res.status(500).json({ 
+            error: "Failed to analyze the live demo link.",
+            message: error.message,
+            scores: { html: 0, css: 0, javascript: 0 } // Return default scores for error cases
+        });
     }
 });
 
