@@ -17,7 +17,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// Enhanced resource discovery and fetching
+// Enhanced resource discovery and fetching with early termination
 const discoverAndFetchResources = async (htmlContent, url) => {
     const baseUrlObj = new URL(url);
     const $ = cheerio.load(htmlContent);
@@ -56,39 +56,11 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         }
     };
     
-    // Improved function to check if a URL likely points to a CSS or JS file
-    const isResourceType = (url, type) => {
-        if (!url) return false;
-        
-        // Check file extension
-        const hasExtension = type === 'css' 
-            ? url.match(/\.css($|\?|#)/) 
-            : url.match(/\.js($|\?|#)/);
-            
-        if (hasExtension) return true;
-        
-        // Check URL path indicators
-        const pathIndicators = type === 'css'
-            ? ['css', 'style', 'theme', 'layout', 'design']
-            : ['js', 'script', 'bundle', 'app', 'main'];
-            
-        for (const indicator of pathIndicators) {
-            if (url.includes(`/${indicator}/`) || url.includes(`/${indicator}.`)) {
-                return true;
-            }
-        }
-        
-        // Check for telltale query parameters
-        if (url.includes('?') && (
-            url.includes('type=text/css') || 
-            url.includes('type=text/javascript') ||
-            url.includes('resource=style') ||
-            url.includes('resource=script')
-        )) {
-            return true;
-        }
-        
-        return false;
+    // Function to check if we have enough resources
+    const hasEnoughResources = (type) => {
+        // Consider a resource collection sufficient if it has at least 2 files 
+        // or at least 10KB of content
+        return results[type].fileCount >= 2 || results[type].byteCount >= 10000;
     };
     
     // Fetch a single resource with robust error handling
@@ -173,6 +145,12 @@ const discoverAndFetchResources = async (htmlContent, url) => {
                 results[type].content += content + '\n';
                 results[type].fileCount++;
                 results[type].byteCount += content.length;
+                
+                // Check if we have enough resources after each fetch
+                if (hasEnoughResources(type)) {
+                    console.log(`Found sufficient ${type} resources. Stopping ${type} discovery.`);
+                    break;
+                }
             }
         }
     };
@@ -208,7 +186,10 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         }
     };
     
+    // PHASE 1: Get explicitly linked resources first (highest priority)
+    
     // 1. Get explicitly linked CSS files
+    console.log("PHASE 1: Fetching explicitly linked resources");
     const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
     console.log(`Found ${cssLinks.length} linked CSS files`);
     await fetchAllResources(cssLinks, 'css');
@@ -221,27 +202,12 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         console.log(`Added ${inlineCSS.length} bytes of inline CSS`);
     }
     
-    // 3. Get CSS from style attributes
-    let attrCSS = '';
-    $('[style]').each((_, el) => {
-        const selector = el.name + ($(el).attr('id') ? '#' + $(el).attr('id') : '') + 
-                       ($(el).attr('class') ? '.' + $(el).attr('class').replace(/\s+/g, '.') : '');
-        const styleContent = $(el).attr('style');
-        attrCSS += `${selector} { ${styleContent} }\n`;
-    });
-    
-    if (attrCSS) {
-        results.css.content += attrCSS;
-        results.css.byteCount += attrCSS.length;
-        console.log(`Added ${attrCSS.length} bytes of attribute CSS`);
-    }
-    
-    // 4. Get explicitly linked JS files
+    // 3. Get explicitly linked JS files
     const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get();
     console.log(`Found ${jsLinks.length} linked JS files`);
     await fetchAllResources(jsLinks, 'js');
     
-    // 5. Get inline JavaScript
+    // 4. Get inline JavaScript
     const inlineJS = $('script:not([src])').map((_, el) => $(el).text()).get().join('\n');
     if (inlineJS) {
         results.js.content += inlineJS;
@@ -249,327 +215,319 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         console.log(`Added ${inlineJS.length} bytes of inline JavaScript`);
     }
     
-    // 6. Enhanced regex search for both CSS and JS resources in HTML
-    // This captures any file ending with .css or .js in multiple contexts
-    const cssJsRegex = /(?:["'\(]\s*)((?:https?:)?\/\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|[^"'\s\/\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?)/g;
-    let match;
-    const cssFilesFound = new Set();
-    const jsFilesFound = new Set();
+    // Check if we have enough resources after Phase 1
+    let needMoreCSS = !hasEnoughResources('css');
+    let needMoreJS = !hasEnoughResources('js');
     
-    console.log("Scanning HTML content for .css and .js references...");
-    while ((match = cssJsRegex.exec(htmlContent)) !== null) {
-        if (match[1]) {
-            const resourcePath = match[1].trim();
-            const absoluteUrl = resolveUrl(resourcePath);
+    // PHASE 2: CSS in style attributes and regex scanning
+    if (needMoreCSS || needMoreJS) {
+        console.log(`PHASE 2: Need more resources: CSS=${needMoreCSS}, JS=${needMoreJS}`);
+        
+        // 5. Get CSS from style attributes
+        if (needMoreCSS) {
+            let attrCSS = '';
+            $('[style]').each((_, el) => {
+                const selector = el.name + ($(el).attr('id') ? '#' + $(el).attr('id') : '') + 
+                               ($(el).attr('class') ? '.' + $(el).attr('class').replace(/\s+/g, '.') : '');
+                const styleContent = $(el).attr('style');
+                attrCSS += `${selector} { ${styleContent} }\n`;
+            });
             
-            // Skip already processed URLs
-            if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-            
-            // Categorize by file extension
-            if (resourcePath.match(/\.css($|\?|#)/)) {
-                cssFilesFound.add(absoluteUrl);
-            } else if (resourcePath.match(/\.js($|\?|#)/)) {
-                jsFilesFound.add(absoluteUrl);
-            }
-        }
-    }
-    
-    console.log(`Found ${cssFilesFound.size} additional CSS files via regex scanning`);
-    await fetchAllResources(Array.from(cssFilesFound), 'css');
-    
-    console.log(`Found ${jsFilesFound.size} additional JS files via regex scanning`);
-    await fetchAllResources(Array.from(jsFilesFound), 'js');
-    
-    // 7. Search for dynamic resource loading patterns
-    const dynamicPatterns = [
-        /loadCSS\s*\(\s*['"]([^'"]+)['"]/g,
-        /appendStylesheet\s*\(\s*['"]([^'"]+)['"]/g,
-        /loadScript\s*\(\s*['"]([^'"]+)['"]/g,
-        /import\s*\(\s*['"]([^'"]+)['"]/g,
-        /require\s*\(\s*['"]([^'"]+)['"]/g,
-        /createElement\s*\(\s*['"]link['"]\)[^}]*href\s*=\s*['"]([^'"]+)['"]/g,
-        /createElement\s*\(\s*['"]script['"]\)[^}]*src\s*=\s*['"]([^'"]+)['"]/g,
-        /\.src\s*=\s*['"]([^'"]+)['"]/g,
-        /\.href\s*=\s*['"]([^'"]+)['"]/g
-    ];
-    
-    const dynamicResources = new Set();
-    
-    for (const pattern of dynamicPatterns) {
-        let dynMatch;
-        while((dynMatch = pattern.exec(htmlContent)) !== null) {
-            if (dynMatch[1]) {
-                const resourcePath = dynMatch[1].trim();
-                const absoluteUrl = resolveUrl(resourcePath);
+            if (attrCSS) {
+                results.css.content += attrCSS;
+                results.css.byteCount += attrCSS.length;
+                console.log(`Added ${attrCSS.length} bytes of attribute CSS`);
                 
-                if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                
-                dynamicResources.add(absoluteUrl);
+                // Re-check CSS needs
+                needMoreCSS = !hasEnoughResources('css');
             }
-        }
-    }
-    
-    console.log(`Found ${dynamicResources.size} potential dynamic resources`);
-    
-    // Verify and categorize dynamic resources
-    for (const resourceUrl of dynamicResources) {
-        // Skip URLs that are clearly not CSS or JS
-        if (resourceUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|webm)($|\?|#)/i)) {
-            continue;
         }
         
-        // First check by file extension
-        if (resourceUrl.match(/\.css($|\?|#)/i)) {
-            const content = await fetchResource(resourceUrl, 'css');
-            if (content) {
-                results.css.content += content + '\n';
-                results.css.fileCount++;
-                results.css.byteCount += content.length;
+        // 6. Enhanced regex search for both CSS and JS resources in HTML
+        // This captures any file ending with .css or .js in multiple contexts
+        if (needMoreCSS || needMoreJS) {
+            const cssJsRegex = /(?:["'\(]\s*)((?:https?:)?\/\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|[^"'\s\/\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?)/g;
+            let match;
+            const cssFilesFound = new Set();
+            const jsFilesFound = new Set();
+            
+            console.log("Scanning HTML content for .css and .js references...");
+            while ((match = cssJsRegex.exec(htmlContent)) !== null) {
+                if (match[1]) {
+                    const resourcePath = match[1].trim();
+                    const absoluteUrl = resolveUrl(resourcePath);
+                    
+                    // Skip already processed URLs
+                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                    
+                    // Categorize by file extension
+                    if (resourcePath.match(/\.css($|\?|#)/) && needMoreCSS) {
+                        cssFilesFound.add(absoluteUrl);
+                    } else if (resourcePath.match(/\.js($|\?|#)/) && needMoreJS) {
+                        jsFilesFound.add(absoluteUrl);
+                    }
+                }
             }
-        } else if (resourceUrl.match(/\.js($|\?|#)/i)) {
-            const content = await fetchResource(resourceUrl, 'js');
-            if (content) {
-                results.js.content += content + '\n';
-                results.js.fileCount++;
-                results.js.byteCount += content.length;
+            
+            // Only fetch additional resources if needed
+            if (needMoreCSS) {
+                console.log(`Found ${cssFilesFound.size} additional CSS files via regex scanning`);
+                await fetchAllResources(Array.from(cssFilesFound), 'css');
+                // Re-check CSS needs
+                needMoreCSS = !hasEnoughResources('css');
             }
-        } else {
-            // For URLs without clear extensions, try to determine by content type
-            const isCss = await verifyResourceType(resourceUrl, 'css');
-            if (isCss) {
+            
+            if (needMoreJS) {
+                console.log(`Found ${jsFilesFound.size} additional JS files via regex scanning`);
+                await fetchAllResources(Array.from(jsFilesFound), 'js');
+                // Re-check JS needs
+                needMoreJS = !hasEnoughResources('js');
+            }
+        }
+    }
+    
+    // Early return if we have enough resources after the main phases
+    if (!needMoreCSS && !needMoreJS) {
+        console.log("Sufficient resources found, skipping additional discovery methods");
+        return results;
+    }
+    
+    // PHASE 3: Dynamic resource loading patterns
+    console.log(`PHASE 3: Using additional discovery methods: CSS=${needMoreCSS}, JS=${needMoreJS}`);
+    
+    if (needMoreCSS || needMoreJS) {
+        const dynamicPatterns = [
+            /loadCSS\s*\(\s*['"]([^'"]+)['"]/g,
+            /appendStylesheet\s*\(\s*['"]([^'"]+)['"]/g,
+            /loadScript\s*\(\s*['"]([^'"]+)['"]/g,
+            /import\s*\(\s*['"]([^'"]+)['"]/g,
+            /require\s*\(\s*['"]([^'"]+)['"]/g,
+            /createElement\s*\(\s*['"]link['"]\)[^}]*href\s*=\s*['"]([^'"]+)['"]/g,
+            /createElement\s*\(\s*['"]script['"]\)[^}]*src\s*=\s*['"]([^'"]+)['"]/g,
+            /\.src\s*=\s*['"]([^'"]+)['"]/g,
+            /\.href\s*=\s*['"]([^'"]+)['"]/g
+        ];
+        
+        const dynamicResources = new Set();
+        
+        for (const pattern of dynamicPatterns) {
+            if (!needMoreCSS && !needMoreJS) break;
+            
+            let dynMatch;
+            while((dynMatch = pattern.exec(htmlContent)) !== null) {
+                if (dynMatch[1]) {
+                    const resourcePath = dynMatch[1].trim();
+                    const absoluteUrl = resolveUrl(resourcePath);
+                    
+                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                    
+                    dynamicResources.add(absoluteUrl);
+                }
+            }
+        }
+        
+        console.log(`Found ${dynamicResources.size} potential dynamic resources`);
+        
+        // Verify and categorize dynamic resources
+        for (const resourceUrl of dynamicResources) {
+            // Recheck needs as we go
+            if (!needMoreCSS && !needMoreJS) break;
+            
+            // Skip URLs that are clearly not CSS or JS
+            if (resourceUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|webm)($|\?|#)/i)) {
+                continue;
+            }
+            
+            // First check by file extension
+            if (needMoreCSS && resourceUrl.match(/\.css($|\?|#)/i)) {
                 const content = await fetchResource(resourceUrl, 'css');
                 if (content) {
                     results.css.content += content + '\n';
                     results.css.fileCount++;
                     results.css.byteCount += content.length;
+                    needMoreCSS = !hasEnoughResources('css');
                 }
-                continue;
-            }
-            
-            const isJs = await verifyResourceType(resourceUrl, 'js');
-            if (isJs) {
+            } else if (needMoreJS && resourceUrl.match(/\.js($|\?|#)/i)) {
                 const content = await fetchResource(resourceUrl, 'js');
                 if (content) {
                     results.js.content += content + '\n';
                     results.js.fileCount++;
                     results.js.byteCount += content.length;
+                    needMoreJS = !hasEnoughResources('js');
                 }
-            }
-        }
-    }
-    
-    // 8. Crawl for assets in common directories
-    const commonDirectories = [
-        '/assets/', '/static/', '/public/', '/dist/', '/build/', 
-        '/js/', '/css/', '/styles/', '/scripts/', '/resources/'
-    ];
-    
-    console.log("Checking common directories for additional resources...");
-    for (const directory of commonDirectories) {
-        const directoryUrl = `${baseUrlObj.origin}${directory}`;
-        
-        try {
-            // Try to fetch the directory listing
-            const response = await axios.get(directoryUrl, {
-                timeout: 5000,
-                headers: { 'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0' },
-                validateStatus: status => status === 200
-            });
-            
-            if (response.data && typeof response.data === 'string') {
-                // Extract links to .css and .js files from directory listing
-                const $dir = cheerio.load(response.data);
-                const directoryLinks = $dir('a').map((_, el) => $dir(el).attr('href')).get();
-                
-                for (const link of directoryLinks) {
-                    if (!link) continue;
-                    
-                    const resourceUrl = resolveUrl(
-                        link.startsWith('/') ? link : `${directory}${link}`
-                    );
-                    
-                    if (!resourceUrl || processedUrls.has(resourceUrl)) continue;
-                    
-                    if (resourceUrl.match(/\.css($|\?|#)/i)) {
+            } else {
+                // For URLs without clear extensions, try to determine by content type
+                if (needMoreCSS) {
+                    const isCss = await verifyResourceType(resourceUrl, 'css');
+                    if (isCss) {
                         const content = await fetchResource(resourceUrl, 'css');
                         if (content) {
                             results.css.content += content + '\n';
                             results.css.fileCount++;
                             results.css.byteCount += content.length;
+                            needMoreCSS = !hasEnoughResources('css');
                         }
-                    } else if (resourceUrl.match(/\.js($|\?|#)/i)) {
+                        continue;
+                    }
+                }
+                
+                if (needMoreJS) {
+                    const isJs = await verifyResourceType(resourceUrl, 'js');
+                    if (isJs) {
                         const content = await fetchResource(resourceUrl, 'js');
                         if (content) {
                             results.js.content += content + '\n';
                             results.js.fileCount++;
                             results.js.byteCount += content.length;
+                            needMoreJS = !hasEnoughResources('js');
                         }
                     }
                 }
             }
-        } catch (error) {
-            // Directory listing not available or access forbidden
         }
     }
     
-    // 9. If no CSS/JS found, try common filenames with any extension
-    if (results.css.fileCount === 0) {
-        console.log("No CSS files found, trying common CSS filenames with any extension...");
-        const commonCssBaseNames = [
-            'style', 'styles', 'main', 'app', 'custom', 'theme', 'layout', 'global'
+    // Early return after Phase 3 if we have enough resources
+    if (!needMoreCSS && !needMoreJS) {
+        console.log("Sufficient resources found after dynamic discovery, skipping additional methods");
+        return results;
+    }
+    
+    // PHASE 4: Webpack/bundled asset paths
+    console.log(`PHASE 4: Looking for webpack assets: CSS=${needMoreCSS}, JS=${needMoreJS}`);
+    
+    if (needMoreCSS || needMoreJS) {
+        const webpackAssetPatterns = [
+            /\/static\/(?:js|css)\/([^"'\s)]+)/g,
+            /\/assets\/(?:js|css)\/([^"'\s)]+)/g,
+            /\/dist\/(?:js|css)\/([^"'\s)]+)/g,
+            /\/build\/(?:js|css)\/([^"'\s)]+)/g,
+            /\/chunk-[a-f0-9]+\.[a-f0-9]+\.(?:js|css)/g,
+            /\/main\.[a-f0-9]+\.chunk\.(?:js|css)/g,
+            /\/[0-9]+\.[a-f0-9]+\.chunk\.(?:js|css)/g,
+            /\/app\.[a-f0-9]+\.(?:js|css)/g
         ];
         
-        const commonExtensions = ['.css', '.min.css', '.bundle.css', '.compiled.css'];
-        const commonPaths = ['', '/css/', '/styles/', '/assets/css/', '/dist/css/', '/static/css/'];
+        const webpackAssets = new Set();
         
-        for (const path of commonPaths) {
-            for (const baseName of commonCssBaseNames) {
-                for (const ext of commonExtensions) {
-                    const cssFile = `${path}${baseName}${ext}`;
-                    const absoluteUrl = resolveUrl(cssFile);
-                    
-                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                    
-                    try {
-                        const content = await fetchResource(absoluteUrl, 'css');
-                        if (content) {
-                            results.css.content += content + '\n';
-                            results.css.fileCount++;
-                            results.css.byteCount += content.length;
-                        }
-                    } catch (error) {
-                        // File not found, continue
-                    }
+        for (const pattern of webpackAssetPatterns) {
+            if (!needMoreCSS && !needMoreJS) break;
+            
+            let wpMatch;
+            while((wpMatch = pattern.exec(htmlContent)) !== null) {
+                const assetPath = wpMatch[0].trim();
+                const absoluteUrl = resolveUrl(assetPath);
+                
+                if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                
+                webpackAssets.add(absoluteUrl);
+            }
+        }
+        
+        console.log(`Found ${webpackAssets.size} potential webpack assets`);
+        
+        for (const assetUrl of webpackAssets) {
+            // Recheck needs as we go
+            if (!needMoreCSS && !needMoreJS) break;
+            
+            if (needMoreCSS && (assetUrl.includes('.css') || assetUrl.match(/\/static\/css\//))) {
+                const content = await fetchResource(assetUrl, 'css');
+                if (content) {
+                    results.css.content += content + '\n';
+                    results.css.fileCount++;
+                    results.css.byteCount += content.length;
+                    needMoreCSS = !hasEnoughResources('css');
+                }
+            } else if (needMoreJS && (assetUrl.includes('.js') || assetUrl.match(/\/static\/js\//))) {
+                const content = await fetchResource(assetUrl, 'js');
+                if (content) {
+                    results.js.content += content + '\n';
+                    results.js.fileCount++;
+                    results.js.byteCount += content.length;
+                    needMoreJS = !hasEnoughResources('js');
                 }
             }
         }
     }
     
-    if (results.js.fileCount === 0) {
-        console.log("No JS files found, trying common JS filenames with any extension...");
-        const commonJsBaseNames = [
-            'script', 'scripts', 'main', 'app', 'index', 'custom', 'bundle', 'vendor'
-        ];
+    // PHASE 5: Common filenames (last resort)
+    if (needMoreCSS || needMoreJS) {
+        console.log(`PHASE 5: Trying common filenames: CSS=${needMoreCSS}, JS=${needMoreJS}`);
         
-        const commonExtensions = ['.js', '.min.js', '.bundle.js', '.compiled.js'];
-        const commonPaths = ['', '/js/', '/scripts/', '/assets/js/', '/dist/js/', '/static/js/'];
-        
-        for (const path of commonPaths) {
-            for (const baseName of commonJsBaseNames) {
-                for (const ext of commonExtensions) {
-                    const jsFile = `${path}${baseName}${ext}`;
-                    const absoluteUrl = resolveUrl(jsFile);
-                    
-                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                    
-                    try {
-                        const content = await fetchResource(absoluteUrl, 'js');
-                        if (content) {
-                            results.js.content += content + '\n';
-                            results.js.fileCount++;
-                            results.js.byteCount += content.length;
-                        }
-                    } catch (error) {
-                        // File not found, continue
-                    }
-                }
-            }
-        }
-    }
-    
-    // 10. Search for webpack/bundled asset paths
-    const webpackAssetPatterns = [
-        /\/static\/(?:js|css)\/([^"'\s)]+)/g,
-        /\/assets\/(?:js|css)\/([^"'\s)]+)/g,
-        /\/dist\/(?:js|css)\/([^"'\s)]+)/g,
-        /\/build\/(?:js|css)\/([^"'\s)]+)/g,
-        /\/chunk-[a-f0-9]+\.[a-f0-9]+\.(?:js|css)/g,
-        /\/main\.[a-f0-9]+\.chunk\.(?:js|css)/g,
-        /\/[0-9]+\.[a-f0-9]+\.chunk\.(?:js|css)/g,
-        /\/app\.[a-f0-9]+\.(?:js|css)/g
-    ];
-    
-    const webpackAssets = new Set();
-    
-    for (const pattern of webpackAssetPatterns) {
-        let wpMatch;
-        while((wpMatch = pattern.exec(htmlContent)) !== null) {
-            const assetPath = wpMatch[0].trim();
-            const absoluteUrl = resolveUrl(assetPath);
+        // If no CSS/JS found, try common filenames with any extension
+        if (needMoreCSS && results.css.fileCount === 0) {
+            console.log("No CSS files found, trying common CSS filenames...");
+            const commonCssBaseNames = [
+                'style', 'styles', 'main', 'app', 'custom', 'theme', 'layout', 'global'
+            ];
             
-            if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+            const commonExtensions = ['.css', '.min.css', '.bundle.css', '.compiled.css'];
+            const commonPaths = ['', '/css/', '/styles/', '/assets/css/', '/dist/css/', '/static/css/'];
             
-            webpackAssets.add(absoluteUrl);
-        }
-    }
-    
-    console.log(`Found ${webpackAssets.size} potential webpack assets`);
-    
-    for (const assetUrl of webpackAssets) {
-        if (assetUrl.includes('.css') || assetUrl.match(/\/static\/css\//)) {
-            const content = await fetchResource(assetUrl, 'css');
-            if (content) {
-                results.css.content += content + '\n';
-                results.css.fileCount++;
-                results.css.byteCount += content.length;
-            }
-        } else if (assetUrl.includes('.js') || assetUrl.match(/\/static\/js\//)) {
-            const content = await fetchResource(assetUrl, 'js');
-            if (content) {
-                results.js.content += content + '\n';
-                results.js.fileCount++;
-                results.js.byteCount += content.length;
-            }
-        }
-    }
-    
-    // 11. Try to find a robots.txt and sitemap for additional resource discovery
-    try {
-        const robotsTxtUrl = `${baseUrlObj.origin}/robots.txt`;
-        const robotsTxt = await fetchResource(robotsTxtUrl, 'text');
-        
-        if (robotsTxt) {
-            // Look for sitemaps in robots.txt
-            const sitemapMatches = robotsTxt.match(/Sitemap:\s*(.*)/g);
-            if (sitemapMatches) {
-                for (const match of sitemapMatches) {
-                    const sitemapUrl = match.replace(/Sitemap:\s*/, '').trim();
-                    console.log(`Found sitemap: ${sitemapUrl}`);
+            outerLoop: for (const path of commonPaths) {
+                for (const baseName of commonCssBaseNames) {
+                    if (!needMoreCSS) break outerLoop;
                     
-                    try {
-                        const sitemapContent = await fetchResource(sitemapUrl, 'text');
-                        // Look for .js and .css files in sitemap
-                        const resourceMatches = sitemapContent.match(/<loc>(.*?\.(?:js|css))<\/loc>/g);
+                    for (const ext of commonExtensions) {
+                        if (!needMoreCSS) break;
                         
-                        if (resourceMatches) {
-                            for (const resourceMatch of resourceMatches) {
-                                const resourceUrl = resourceMatch.replace(/<loc>(.*)<\/loc>/, '$1');
-                                
-                                if (resourceUrl.endsWith('.css')) {
-                                    const content = await fetchResource(resourceUrl, 'css');
-                                    if (content) {
-                                        results.css.content += content + '\n';
-                                        results.css.fileCount++;
-                                        results.css.byteCount += content.length;
-                                    }
-                                } else if (resourceUrl.endsWith('.js')) {
-                                    const content = await fetchResource(resourceUrl, 'js');
-                                    if (content) {
-                                        results.js.content += content + '\n';
-                                        results.js.fileCount++;
-                                        results.js.byteCount += content.length;
-                                    }
-                                }
+                        const cssFile = `${path}${baseName}${ext}`;
+                        const absoluteUrl = resolveUrl(cssFile);
+                        
+                        if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                        
+                        try {
+                            const content = await fetchResource(absoluteUrl, 'css');
+                            if (content) {
+                                results.css.content += content + '\n';
+                                results.css.fileCount++;
+                                results.css.byteCount += content.length;
+                                needMoreCSS = !hasEnoughResources('css');
                             }
+                        } catch (error) {
+                            // File not found, continue
                         }
-                    } catch (error) {
-                        console.log(`Error processing sitemap: ${error.message}`);
                     }
                 }
             }
         }
-    } catch (error) {
-        console.log(`Error fetching robots.txt: ${error.message}`);
+        
+        if (needMoreJS && results.js.fileCount === 0) {
+            console.log("No JS files found, trying common JS filenames...");
+            const commonJsBaseNames = [
+                'script', 'scripts', 'main', 'app', 'index', 'custom', 'bundle', 'vendor'
+            ];
+            
+            const commonExtensions = ['.js', '.min.js', '.bundle.js', '.compiled.js'];
+            const commonPaths = ['', '/js/', '/scripts/', '/assets/js/', '/dist/js/', '/static/js/'];
+            
+            outerLoop: for (const path of commonPaths) {
+                for (const baseName of commonJsBaseNames) {
+                    if (!needMoreJS) break outerLoop;
+                    
+                    for (const ext of commonExtensions) {
+                        if (!needMoreJS) break;
+                        
+                        const jsFile = `${path}${baseName}${ext}`;
+                        const absoluteUrl = resolveUrl(jsFile);
+                        
+                        if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                        
+                        try {
+                            const content = await fetchResource(absoluteUrl, 'js');
+                            if (content) {
+                                results.js.content += content + '\n';
+                                results.js.fileCount++;
+                                results.js.byteCount += content.length;
+                                needMoreJS = !hasEnoughResources('js');
+                            }
+                        } catch (error) {
+                            // File not found, continue
+                        }
+                    }
+                }
+            }
+        }
     }
     
     return results;
@@ -733,7 +691,6 @@ app.post('/analyze', async (req, res) => {
         }
         
         // JS Analysis
-        // JS Analysis
         console.log(`Starting JavaScript analysis with ${resources.js.byteCount} bytes of content...`);
         let jsResults;
         if (resources.js.content && resources.js.content.trim().length > 0) {
@@ -777,12 +734,72 @@ app.post('/analyze', async (req, res) => {
         res.json(response);
         
     } catch (error) {
-        console.error("Error analyzing URL:", error);
-        res.status(500).json({ 
-            error: "Failed to analyze the website",
-            details: error.message
+       console.error("Error analyzing URL:", error);
+        res.status(500).json({
+            error: "An error occurred while analyzing the website",
+            message: error.message || "Unknown error"
         });
     }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', version: '1.0.0' });
+});
+
+// Documentation endpoint
+app.get('/', (req, res) => {
+    res.send(`
+        <html>
+            <head>
+                <title>Skifolio Analyzer API</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                    h1 { color: #333; }
+                    code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
+                </style>
+            </head>
+            <body>
+                <h1>Skifolio Website Analyzer API</h1>
+                <p>Welcome to the Skifolio website analyzer API. This service analyzes HTML, CSS, and JavaScript of websites.</p>
+                
+                <h2>Endpoints:</h2>
+                <h3>POST /analyze</h3>
+                <p>Submit a URL for analysis.</p>
+                <pre><code>
+                POST /analyze
+                Content-Type: application/json
+                
+                {
+                    "url": "https://example.com"
+                }
+                </code></pre>
+                
+                <h3>GET /health</h3>
+                <p>Check if the API is running properly.</p>
+                
+                <p>For more information, visit <a href="https://skifolio.netlify.app">Skifolio</a></p>
+            </body>
+        </html>
+    `);
+});
+
+// Handle 404 errors
+app.use((req, res) => {
+    res.status(404).json({ error: "Endpoint not found" });
+});
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Skifolio API server running on port ${PORT}`);
+    console.log(`API is available at http://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+const shutdown = () => {
+    console.log('Shutting down server gracefully...');
+    process.exit(0);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
