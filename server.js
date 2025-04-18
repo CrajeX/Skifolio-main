@@ -60,7 +60,7 @@ const discoverAndFetchResources = async (htmlContent, url) => {
     const hasEnoughResources = (type) => {
         // Consider a resource collection sufficient if it has at least 2 files 
         // or at least 10KB of content
-        return results[type].fileCount >= 2 || results[type].byteCount >= 10000;
+        return results[type].fileCount >= 1 || results[type].byteCount >= 5000;
     };
     
     // Fetch a single resource with robust error handling
