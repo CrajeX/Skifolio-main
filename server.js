@@ -39,38 +39,99 @@ const SCORING_CONFIG = {
     }
 };
 
+// Improved function to fetch external resources reliably
 const fetchExternalFiles = async (links, baseURL) => {
     const contents = [];
+    
+    // Normalize the base URL to ensure proper resolution
+    const baseUrlObj = new URL(baseURL);
+    console.log(`Base URL for resolution: ${baseUrlObj.href}`);
+    
     for (const link of links) {
         try {
-            // Skip external CDNs and third-party scripts
-            if (link.includes('//') && 
-                !link.includes(new URL(baseURL).hostname) && 
-                !link.startsWith('/')) {
-                console.log(`Skipping external resource: ${link}`);
+            // Skip empty links
+            if (!link || link.trim() === '') {
+                console.log('Skipping empty link');
                 continue;
             }
             
-            const url = new URL(link, baseURL).href; // Ensures absolute URL
-            console.log(`Attempting to fetch: ${url}`);
+            // Handle different URL formats
+            let absoluteUrl;
+            try {
+                // Handle absolute URLs
+                if (link.startsWith('http://') || link.startsWith('https://')) {
+                    absoluteUrl = link;
+                } 
+                // Handle protocol-relative URLs (//example.com/style.css)
+                else if (link.startsWith('//')) {
+                    absoluteUrl = `${baseUrlObj.protocol}${link}`;
+                }
+                // Handle root-relative URLs (/style.css)
+                else if (link.startsWith('/')) {
+                    absoluteUrl = `${baseUrlObj.origin}${link}`;
+                }
+                // Handle relative URLs (style.css or ../style.css)
+                else {
+                    // Get the directory part of the base URL
+                    const basePath = baseUrlObj.pathname.split('/').slice(0, -1).join('/') + '/';
+                    absoluteUrl = `${baseUrlObj.origin}${basePath}${link}`;
+                }
+            } catch (urlError) {
+                console.error(`URL resolution error for ${link}:`, urlError.message);
+                continue; // Skip this URL and continue with the next
+            }
             
-            const response = await axios.get(url, { 
-                timeout: 5000,
-                headers: {'User-Agent': 'SkifolioAnalyzer/1.0'}
+            console.log(`Attempting to fetch: ${absoluteUrl}`);
+            
+            // Skip common third-party and CDN URLs that might cause issues
+            if (absoluteUrl.includes('googleapis.com') || 
+                absoluteUrl.includes('cdnjs.cloudflare.com') ||
+                absoluteUrl.includes('analytics') ||
+                absoluteUrl.includes('tracking') ||
+                absoluteUrl.includes('fonts.googleapis.com')) {
+                console.log(`Skipping third-party resource: ${absoluteUrl}`);
+                continue;
+            }
+            
+            const response = await axios.get(absoluteUrl, { 
+                timeout: 8000,
+                headers: {
+                    'User-Agent': 'SkifolioAnalyzer/1.0',
+                    'Accept': 'text/css,application/javascript,text/javascript,*/*'
+                },
+                validateStatus: status => status < 400, // Consider any 2xx or 3xx as success
+                maxContentLength: 1024 * 1024 // 1MB limit to prevent huge files
             });
             
-            if (response.data && typeof response.data === 'string' && response.data.length > 0) {
-                contents.push(response.data);
-                console.log(`Successfully fetched content from: ${url} (${response.data.length} bytes)`);
+            // Check if content exists and is text
+            if (response.data) {
+                if (typeof response.data === 'string') {
+                    contents.push(response.data);
+                    console.log(`Successfully fetched content from: ${absoluteUrl} (${response.data.length} bytes)`);
+                } else if (typeof response.data === 'object') {
+                    // If we got a JSON response instead of CSS/JS, skip it
+                    console.warn(`Received non-text content from: ${absoluteUrl}`);
+                }
             } else {
-                console.warn(`Empty or non-text content received from: ${url}`);
+                console.warn(`Empty content received from: ${absoluteUrl}`);
             }
         } catch (error) {
-            console.error(`Failed to fetch external file at ${link}:`, error.message);
+            // More detailed error logging
+            if (error.response) {
+                console.error(`Error fetching ${link}: Server responded with status ${error.response.status}`);
+            } else if (error.request) {
+                console.error(`Error fetching ${link}: No response received (timeout/network issue)`);
+            } else {
+                console.error(`Error fetching ${link}: ${error.message}`);
+            }
         }
     }
+    
     return contents.join('\n');
 };
+
+// Update the /analyze endpoint to handle resource fetching more robustly
+
 
 // Enhanced HTML evaluation with categorical scoring
 const evaluateHTML = (htmlContent) => {
@@ -706,9 +767,11 @@ app.post('/analyze', async (req, res) => {
     
     try {
         // Validate URL is accessible
+        console.log(`Checking if URL is accessible: ${url}`);
         const { status } = await axios.head(url, { 
-            timeout: 5000,
-            validateStatus: (status) => status < 500 // Accept any status below 500
+            timeout: 8000,
+            validateStatus: (status) => status < 500, // Accept any status below 500
+            headers: {'User-Agent': 'SkifolioAnalyzer/1.0'}
         }).catch(() => ({ status: 404 }));
         
         if (status >= 400) {
@@ -720,7 +783,6 @@ app.post('/analyze', async (req, res) => {
         console.log(`Analyzing URL: ${url}`);
         
         // Fetch HTML content
-       // Fetch HTML content
         const { data: htmlData } = await axios.get(url, {
             timeout: 10000,
             headers: {'User-Agent': 'SkifolioAnalyzer/1.0'}
@@ -733,33 +795,109 @@ app.post('/analyze', async (req, res) => {
         const htmlResults = evaluateHTML(htmlData);
         console.log(`HTML analysis complete. Score: ${htmlResults.score}`);
         
-        // CSS Analysis
+        // CSS Analysis - Improved extraction
         console.log("Starting CSS analysis...");
-        const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
-        const inlineCSS = $('style').map((_, el) => $(el).text()).get().join('\n');
         
-        const cssContent = inlineCSS + await fetchExternalFiles(cssLinks, url);
+        // Get all CSS links with absolute URLs
+        const cssLinks = $('link[rel="stylesheet"]').map((_, el) => {
+            const href = $(el).attr('href');
+            return href ? href.trim() : null;
+        }).get().filter(Boolean); // Remove nulls and empty strings
+        
+        console.log(`Found ${cssLinks.length} CSS files:`, cssLinks);
+        
+        // Get all inline styles
+        const inlineCSS = $('style').map((_, el) => $(el).text()).get().join('\n');
+        console.log(`Found ${inlineCSS.length} bytes of inline CSS`);
+        
+        // Extract CSS from style attributes
+        let attributeCSS = '';
+        $('[style]').each((_, el) => {
+            const selector = el.name + ($(el).attr('id') ? '#' + $(el).attr('id') : '');
+            const styleContent = $(el).attr('style');
+            attributeCSS += `${selector} { ${styleContent} }\n`;
+        });
+        
+        console.log(`Extracted ${attributeCSS.length} bytes of CSS from style attributes`);
+        
+        // Combine all CSS
+        const combinedInlineCSS = inlineCSS + attributeCSS;
+        const externalCSS = await fetchExternalFiles(cssLinks, url);
+        const cssContent = combinedInlineCSS + externalCSS;
+        
         console.log(`Combined CSS Content Length: ${cssContent.length} bytes`);
         
-        const cssResults = evaluateCSS(cssContent);
-        console.log(`CSS analysis complete. Score: ${cssResults.score}`);
+        let cssResults;
+        if (cssContent.trim().length > 0) {
+            cssResults = evaluateCSS(cssContent);
+            console.log(`CSS analysis complete. Score: ${cssResults.score}`);
+        } else {
+            console.warn("No CSS content found to analyze");
+            cssResults = {
+                score: 0,
+                categoryScores: {
+                    bestPractices: 0,
+                    performance: 0,
+                    organization: 0,
+                    compatibility: 0
+                },
+                feedback: ["No CSS content found to analyze"]
+            };
+        }
         
-        // JavaScript Analysis
+        // JavaScript Analysis - Improved extraction
         console.log("Starting JavaScript analysis...");
-        const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get()
-            .filter(src => !src.includes('analytics') && !src.includes('tracking')); // Skip analytics scripts
-            
-        const inlineJS = $('script:not([src])').map((_, el) => $(el).text()).get().join('\n');
         
-        const jsContent = inlineJS + await fetchExternalFiles(jsLinks, url);
+        // Get all script tags with src attributes
+        const jsLinks = $('script[src]').map((_, el) => {
+            const src = $(el).attr('src');
+            return src ? src.trim() : null;
+        }).get()
+            .filter(Boolean) // Remove nulls and empty strings
+            .filter(src => 
+                !src.includes('analytics') && 
+                !src.includes('tracking') && 
+                !src.includes('google-tag') &&
+                !src.includes('gtm.js') &&
+                !src.includes('gtag')
+            ); // Skip analytics scripts
+        
+        console.log(`Found ${jsLinks.length} JavaScript files:`, jsLinks);
+        
+        // Get all inline scripts without src attributes
+        const inlineJS = $('script:not([src])').map((_, el) => $(el).text()).get().join('\n');
+        console.log(`Found ${inlineJS.length} bytes of inline JavaScript`);
+        
+        // Combine all JavaScript
+        const externalJS = await fetchExternalFiles(jsLinks, url);
+        const jsContent = inlineJS + externalJS;
+        
         console.log(`Combined JavaScript Content Length: ${jsContent.length} bytes`);
         
         let jsResults;
-        try {
-            jsResults = await evaluateJavaScript(jsContent);
-            console.log(`JavaScript analysis complete. Score: ${jsResults.score}`);
-        } catch (error) {
-            console.error("Error during JavaScript evaluation:", error);
+        if (jsContent.trim().length > 0) {
+            try {
+                jsResults = await evaluateJavaScript(jsContent);
+                console.log(`JavaScript analysis complete. Score: ${jsResults.score}`);
+            } catch (error) {
+                console.error("Error during JavaScript evaluation:", error);
+                jsResults = {
+                    score: 50, // Default score instead of 0 for errors
+                    categoryScores: {
+                        codeQuality: 10,
+                        performance: 10,
+                        modularity: 10,
+                        security: 10,
+                        bestPractices: 10
+                    },
+                    feedback: [
+                        "Error analyzing JavaScript: " + error.message,
+                        "Analysis was performed on partial content only"
+                    ]
+                };
+            }
+        } else {
+            console.warn("No JavaScript content found to analyze");
             jsResults = {
                 score: 0,
                 categoryScores: {
@@ -769,7 +907,7 @@ app.post('/analyze', async (req, res) => {
                     security: 0,
                     bestPractices: 0
                 },
-                feedback: ["Error analyzing JavaScript: " + error.message]
+                feedback: ["No JavaScript content found to analyze"]
             };
         }
         
@@ -800,6 +938,14 @@ app.post('/analyze', async (req, res) => {
                 html: htmlResults.feedback,
                 css: cssResults.feedback,
                 javascript: jsResults.feedback
+            },
+            debug: {
+                cssFilesFound: cssLinks.length,
+                jsFilesFound: jsLinks.length,
+                inlineCssBytes: inlineCSS.length,
+                inlineJsBytes: inlineJS.length,
+                totalCssBytes: cssContent.length,
+                totalJsBytes: jsContent.length
             }
         };
         
@@ -809,7 +955,8 @@ app.post('/analyze', async (req, res) => {
         console.error("Error analyzing URL:", error);
         res.status(500).json({ 
             error: "Failed to analyze the website",
-            details: error.message
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
