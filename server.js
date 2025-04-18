@@ -4,8 +4,6 @@ const { ESLint } = require('eslint');
 const csslint = require('csslint').CSSLint;
 const cors = require('cors');
 const cheerio = require('cheerio');
-const path = require('path');
-const fs = require('fs').promises;
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -17,789 +15,817 @@ app.use(cors({
 
 app.use(express.json());
 
-// Enhanced resource discovery and fetching with early termination
-const discoverAndFetchResources = async (htmlContent, url) => {
-    const baseUrlObj = new URL(url);
-    const $ = cheerio.load(htmlContent);
-    const results = {
-        css: { content: '', fileCount: 0, byteCount: 0 },
-        js: { content: '', fileCount: 0, byteCount: 0 }
-    };
-    
-    // Track processed URLs to avoid duplicates
-    const processedUrls = new Set();
-    
-    // Utility function to resolve URLs properly
-    const resolveUrl = (linkPath) => {
+// Configuration for scoring weights
+const SCORING_CONFIG = {
+    html: {
+        semanticStructure: 20,
+        accessibility: 20,
+        modernPractices: 20,
+        performance: 20,
+        seo: 20
+    },
+    css: {
+        bestPractices: 25,
+        performance: 25,
+        organization: 25,
+        compatibility: 25
+    },
+    javascript: {
+        codeQuality: 20,
+        performance: 20,
+        modularity: 20,
+        security: 20,
+        bestPractices: 20
+    }
+};
+
+const fetchExternalFiles = async (links, baseURL) => {
+    const contents = [];
+    for (const link of links) {
         try {
-            // Handle absolute URLs
-            if (linkPath.startsWith('http://') || linkPath.startsWith('https://')) {
-                return linkPath;
-            } 
-            // Handle protocol-relative URLs (//example.com/style.css)
-            else if (linkPath.startsWith('//')) {
-                return `${baseUrlObj.protocol}${linkPath}`;
+            // Skip external CDNs and third-party scripts
+            if (link.includes('//') && 
+                !link.includes(new URL(baseURL).hostname) && 
+                !link.startsWith('/')) {
+                console.log(`Skipping external resource: ${link}`);
+                continue;
             }
-            // Handle root-relative URLs (/style.css)
-            else if (linkPath.startsWith('/')) {
-                return `${baseUrlObj.origin}${linkPath}`;
-            }
-            // Handle relative URLs (style.css or ../style.css)
-            else {
-                // Get the directory part of the base URL
-                const basePath = baseUrlObj.pathname.split('/').slice(0, -1).join('/') + '/';
-                return `${baseUrlObj.origin}${basePath}${linkPath}`;
-            }
-        } catch (error) {
-            console.error(`URL resolution error for ${linkPath}:`, error.message);
-            return null;
-        }
-    };
-    
-    // Function to check if we have enough resources
-    const hasEnoughResources = (type) => {
-        // Consider a resource collection sufficient if it has at least 2 files 
-        // or at least 10KB of content
-        return results[type].fileCount >= 1 || results[type].byteCount >= 5000;
-    };
-    
-    // Fetch a single resource with robust error handling
-    const fetchResource = async (url, type) => {
-        // Skip if already processed
-        if (processedUrls.has(url)) {
-            return '';
-        }
-        
-        processedUrls.add(url);
-        
-        try {
+            
+            const url = new URL(link, baseURL).href; // Ensures absolute URL
+            console.log(`Attempting to fetch: ${url}`);
+            
             const response = await axios.get(url, { 
-                timeout: 8000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0',
-                    'Accept': type === 'css' 
-                        ? 'text/css,*/*' 
-                        : 'application/javascript,text/javascript,*/*'
-                },
-                validateStatus: status => status < 400,
-                responseType: 'text'
+                timeout: 5000,
+                headers: {'User-Agent': 'SkifolioAnalyzer/1.0'}
             });
             
-            if (response.data && typeof response.data === 'string') {
-                // For CSS, check content type as an additional verification
-                if (type === 'css' && response.headers['content-type'] && 
-                    !response.headers['content-type'].includes('text/css') && 
-                    !url.endsWith('.css')) {
-                    console.warn(`Skipping non-CSS content from: ${url} (Content-Type: ${response.headers['content-type']})`);
-                    return '';
-                }
-                
-                // For JS, check content type as an additional verification
-                if (type === 'js' && response.headers['content-type'] && 
-                    !response.headers['content-type'].includes('javascript') && 
-                    !response.headers['content-type'].includes('application/json') && 
-                    !url.endsWith('.js')) {
-                    console.warn(`Skipping non-JS content from: ${url} (Content-Type: ${response.headers['content-type']})`);
-                    return '';
-                }
-                
-                console.log(`Successfully fetched ${type} from: ${url} (${response.data.length} bytes)`);
-                return response.data;
+            if (response.data && typeof response.data === 'string' && response.data.length > 0) {
+                contents.push(response.data);
+                console.log(`Successfully fetched content from: ${url} (${response.data.length} bytes)`);
             } else {
                 console.warn(`Empty or non-text content received from: ${url}`);
-                return '';
             }
         } catch (error) {
-            if (error.response) {
-                console.error(`Error fetching ${url}: Server responded with status ${error.response.status}`);
-            } else if (error.request) {
-                console.error(`Error fetching ${url}: No response received (timeout/network issue)`);
-            } else {
-                console.error(`Error fetching ${url}: ${error.message}`);
-            }
-            return '';
-        }
-    };
-    
-    // Fetch all resources of a specific type
-    const fetchAllResources = async (links, type) => {
-        for (const link of links) {
-            if (!link || typeof link !== 'string' || link.trim() === '') continue;
-                
-            // Skip common third-party resources
-            if (link.includes('googleapis.com') || 
-                link.includes('cdnjs.cloudflare.com') ||
-                link.includes('analytics') ||
-                link.includes('tracking') ||
-                link.includes('gtm') ||
-                link.includes('facebook') ||
-                link.includes('twitter')) {
-                continue;
-            }
-            
-            const absoluteUrl = resolveUrl(link.trim());
-            if (!absoluteUrl) continue;
-            
-            const content = await fetchResource(absoluteUrl, type);
-            if (content) {
-                results[type].content += content + '\n';
-                results[type].fileCount++;
-                results[type].byteCount += content.length;
-                
-                // Check if we have enough resources after each fetch
-                if (hasEnoughResources(type)) {
-                    console.log(`Found sufficient ${type} resources. Stopping ${type} discovery.`);
-                    break;
-                }
-            }
-        }
-    };
-    
-    // Use HEAD request to verify if URL is a JS or CSS file
-    const verifyResourceType = async (url, type) => {
-        try {
-            const response = await axios.head(url, {
-                timeout: 5000,
-                headers: { 'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0' },
-                validateStatus: status => status === 200
-            });
-            
-            const contentType = response.headers['content-type'] || '';
-            if (type === 'css' && contentType.includes('text/css')) {
-                return true;
-            }
-            if (type === 'js' && (
-                contentType.includes('javascript') || 
-                contentType.includes('application/json')
-            )) {
-                return true;
-            }
-            
-            // Fallback to file extension if content-type is missing or ambiguous
-            if (url.endsWith(`.${type}`)) {
-                return true;
-            }
-            
-            return false;
-        } catch (error) {
-            return false;
-        }
-    };
-    
-    // PHASE 1: Get explicitly linked resources first (highest priority)
-    
-    // 1. Get explicitly linked CSS files
-    console.log("PHASE 1: Fetching explicitly linked resources");
-    const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
-    console.log(`Found ${cssLinks.length} linked CSS files`);
-    await fetchAllResources(cssLinks, 'css');
-    
-    // 2. Get inline CSS from style tags
-    const inlineCSS = $('style').map((_, el) => $(el).text()).get().join('\n');
-    if (inlineCSS) {
-        results.css.content += inlineCSS;
-        results.css.byteCount += inlineCSS.length;
-        console.log(`Added ${inlineCSS.length} bytes of inline CSS`);
-    }
-    
-    // 3. Get explicitly linked JS files
-    const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get();
-    console.log(`Found ${jsLinks.length} linked JS files`);
-    await fetchAllResources(jsLinks, 'js');
-    
-    // 4. Get inline JavaScript
-    const inlineJS = $('script:not([src])').map((_, el) => $(el).text()).get().join('\n');
-    if (inlineJS) {
-        results.js.content += inlineJS;
-        results.js.byteCount += inlineJS.length;
-        console.log(`Added ${inlineJS.length} bytes of inline JavaScript`);
-    }
-    
-    // Check if we have enough resources after Phase 1
-    let needMoreCSS = !hasEnoughResources('css');
-    let needMoreJS = !hasEnoughResources('js');
-    
-    // PHASE 2: CSS in style attributes and regex scanning
-    if (needMoreCSS || needMoreJS) {
-        console.log(`PHASE 2: Need more resources: CSS=${needMoreCSS}, JS=${needMoreJS}`);
-        
-        // 5. Get CSS from style attributes
-        if (needMoreCSS) {
-            let attrCSS = '';
-            $('[style]').each((_, el) => {
-                const selector = el.name + ($(el).attr('id') ? '#' + $(el).attr('id') : '') + 
-                               ($(el).attr('class') ? '.' + $(el).attr('class').replace(/\s+/g, '.') : '');
-                const styleContent = $(el).attr('style');
-                attrCSS += `${selector} { ${styleContent} }\n`;
-            });
-            
-            if (attrCSS) {
-                results.css.content += attrCSS;
-                results.css.byteCount += attrCSS.length;
-                console.log(`Added ${attrCSS.length} bytes of attribute CSS`);
-                
-                // Re-check CSS needs
-                needMoreCSS = !hasEnoughResources('css');
-            }
-        }
-        
-        // 6. Enhanced regex search for both CSS and JS resources in HTML
-        // This captures any file ending with .css or .js in multiple contexts
-        if (needMoreCSS || needMoreJS) {
-            const cssJsRegex = /(?:["'\(]\s*)((?:https?:)?\/\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|[^"'\s\/\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?)/g;
-            let match;
-            const cssFilesFound = new Set();
-            const jsFilesFound = new Set();
-            
-            console.log("Scanning HTML content for .css and .js references...");
-            while ((match = cssJsRegex.exec(htmlContent)) !== null) {
-                if (match[1]) {
-                    const resourcePath = match[1].trim();
-                    const absoluteUrl = resolveUrl(resourcePath);
-                    
-                    // Skip already processed URLs
-                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                    
-                    // Categorize by file extension
-                    if (resourcePath.match(/\.css($|\?|#)/) && needMoreCSS) {
-                        cssFilesFound.add(absoluteUrl);
-                    } else if (resourcePath.match(/\.js($|\?|#)/) && needMoreJS) {
-                        jsFilesFound.add(absoluteUrl);
-                    }
-                }
-            }
-            
-            // Only fetch additional resources if needed
-            if (needMoreCSS) {
-                console.log(`Found ${cssFilesFound.size} additional CSS files via regex scanning`);
-                await fetchAllResources(Array.from(cssFilesFound), 'css');
-                // Re-check CSS needs
-                needMoreCSS = !hasEnoughResources('css');
-            }
-            
-            if (needMoreJS) {
-                console.log(`Found ${jsFilesFound.size} additional JS files via regex scanning`);
-                await fetchAllResources(Array.from(jsFilesFound), 'js');
-                // Re-check JS needs
-                needMoreJS = !hasEnoughResources('js');
-            }
+            console.error(`Failed to fetch external file at ${link}:`, error.message);
         }
     }
-    
-    // Early return if we have enough resources after the main phases
-    if (!needMoreCSS && !needMoreJS) {
-        console.log("Sufficient resources found, skipping additional discovery methods");
-        return results;
-    }
-    
-    // PHASE 3: Dynamic resource loading patterns
-    console.log(`PHASE 3: Using additional discovery methods: CSS=${needMoreCSS}, JS=${needMoreJS}`);
-    
-    if (needMoreCSS || needMoreJS) {
-        const dynamicPatterns = [
-            /loadCSS\s*\(\s*['"]([^'"]+)['"]/g,
-            /appendStylesheet\s*\(\s*['"]([^'"]+)['"]/g,
-            /loadScript\s*\(\s*['"]([^'"]+)['"]/g,
-            /import\s*\(\s*['"]([^'"]+)['"]/g,
-            /require\s*\(\s*['"]([^'"]+)['"]/g,
-            /createElement\s*\(\s*['"]link['"]\)[^}]*href\s*=\s*['"]([^'"]+)['"]/g,
-            /createElement\s*\(\s*['"]script['"]\)[^}]*src\s*=\s*['"]([^'"]+)['"]/g,
-            /\.src\s*=\s*['"]([^'"]+)['"]/g,
-            /\.href\s*=\s*['"]([^'"]+)['"]/g
-        ];
-        
-        const dynamicResources = new Set();
-        
-        for (const pattern of dynamicPatterns) {
-            if (!needMoreCSS && !needMoreJS) break;
-            
-            let dynMatch;
-            while((dynMatch = pattern.exec(htmlContent)) !== null) {
-                if (dynMatch[1]) {
-                    const resourcePath = dynMatch[1].trim();
-                    const absoluteUrl = resolveUrl(resourcePath);
-                    
-                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                    
-                    dynamicResources.add(absoluteUrl);
-                }
-            }
-        }
-        
-        console.log(`Found ${dynamicResources.size} potential dynamic resources`);
-        
-        // Verify and categorize dynamic resources
-        for (const resourceUrl of dynamicResources) {
-            // Recheck needs as we go
-            if (!needMoreCSS && !needMoreJS) break;
-            
-            // Skip URLs that are clearly not CSS or JS
-            if (resourceUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|webm)($|\?|#)/i)) {
-                continue;
-            }
-            
-            // First check by file extension
-            if (needMoreCSS && resourceUrl.match(/\.css($|\?|#)/i)) {
-                const content = await fetchResource(resourceUrl, 'css');
-                if (content) {
-                    results.css.content += content + '\n';
-                    results.css.fileCount++;
-                    results.css.byteCount += content.length;
-                    needMoreCSS = !hasEnoughResources('css');
-                }
-            } else if (needMoreJS && resourceUrl.match(/\.js($|\?|#)/i)) {
-                const content = await fetchResource(resourceUrl, 'js');
-                if (content) {
-                    results.js.content += content + '\n';
-                    results.js.fileCount++;
-                    results.js.byteCount += content.length;
-                    needMoreJS = !hasEnoughResources('js');
-                }
-            } else {
-                // For URLs without clear extensions, try to determine by content type
-                if (needMoreCSS) {
-                    const isCss = await verifyResourceType(resourceUrl, 'css');
-                    if (isCss) {
-                        const content = await fetchResource(resourceUrl, 'css');
-                        if (content) {
-                            results.css.content += content + '\n';
-                            results.css.fileCount++;
-                            results.css.byteCount += content.length;
-                            needMoreCSS = !hasEnoughResources('css');
-                        }
-                        continue;
-                    }
-                }
-                
-                if (needMoreJS) {
-                    const isJs = await verifyResourceType(resourceUrl, 'js');
-                    if (isJs) {
-                        const content = await fetchResource(resourceUrl, 'js');
-                        if (content) {
-                            results.js.content += content + '\n';
-                            results.js.fileCount++;
-                            results.js.byteCount += content.length;
-                            needMoreJS = !hasEnoughResources('js');
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Early return after Phase 3 if we have enough resources
-    if (!needMoreCSS && !needMoreJS) {
-        console.log("Sufficient resources found after dynamic discovery, skipping additional methods");
-        return results;
-    }
-    
-    // PHASE 4: Webpack/bundled asset paths
-    console.log(`PHASE 4: Looking for webpack assets: CSS=${needMoreCSS}, JS=${needMoreJS}`);
-    
-    if (needMoreCSS || needMoreJS) {
-        const webpackAssetPatterns = [
-            /\/static\/(?:js|css)\/([^"'\s)]+)/g,
-            /\/assets\/(?:js|css)\/([^"'\s)]+)/g,
-            /\/dist\/(?:js|css)\/([^"'\s)]+)/g,
-            /\/build\/(?:js|css)\/([^"'\s)]+)/g,
-            /\/chunk-[a-f0-9]+\.[a-f0-9]+\.(?:js|css)/g,
-            /\/main\.[a-f0-9]+\.chunk\.(?:js|css)/g,
-            /\/[0-9]+\.[a-f0-9]+\.chunk\.(?:js|css)/g,
-            /\/app\.[a-f0-9]+\.(?:js|css)/g
-        ];
-        
-        const webpackAssets = new Set();
-        
-        for (const pattern of webpackAssetPatterns) {
-            if (!needMoreCSS && !needMoreJS) break;
-            
-            let wpMatch;
-            while((wpMatch = pattern.exec(htmlContent)) !== null) {
-                const assetPath = wpMatch[0].trim();
-                const absoluteUrl = resolveUrl(assetPath);
-                
-                if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                
-                webpackAssets.add(absoluteUrl);
-            }
-        }
-        
-        console.log(`Found ${webpackAssets.size} potential webpack assets`);
-        
-        for (const assetUrl of webpackAssets) {
-            // Recheck needs as we go
-            if (!needMoreCSS && !needMoreJS) break;
-            
-            if (needMoreCSS && (assetUrl.includes('.css') || assetUrl.match(/\/static\/css\//))) {
-                const content = await fetchResource(assetUrl, 'css');
-                if (content) {
-                    results.css.content += content + '\n';
-                    results.css.fileCount++;
-                    results.css.byteCount += content.length;
-                    needMoreCSS = !hasEnoughResources('css');
-                }
-            } else if (needMoreJS && (assetUrl.includes('.js') || assetUrl.match(/\/static\/js\//))) {
-                const content = await fetchResource(assetUrl, 'js');
-                if (content) {
-                    results.js.content += content + '\n';
-                    results.js.fileCount++;
-                    results.js.byteCount += content.length;
-                    needMoreJS = !hasEnoughResources('js');
-                }
-            }
-        }
-    }
-    
-    // PHASE 5: Common filenames (last resort)
-    if (needMoreCSS || needMoreJS) {
-        console.log(`PHASE 5: Trying common filenames: CSS=${needMoreCSS}, JS=${needMoreJS}`);
-        
-        // If no CSS/JS found, try common filenames with any extension
-        if (needMoreCSS && results.css.fileCount === 0) {
-            console.log("No CSS files found, trying common CSS filenames...");
-            const commonCssBaseNames = [
-                'style', 'styles', 'main', 'app', 'custom', 'theme', 'layout', 'global'
-            ];
-            
-            const commonExtensions = ['.css', '.min.css', '.bundle.css', '.compiled.css'];
-            const commonPaths = ['', '/css/', '/styles/', '/assets/css/', '/dist/css/', '/static/css/'];
-            
-            outerLoop: for (const path of commonPaths) {
-                for (const baseName of commonCssBaseNames) {
-                    if (!needMoreCSS) break outerLoop;
-                    
-                    for (const ext of commonExtensions) {
-                        if (!needMoreCSS) break;
-                        
-                        const cssFile = `${path}${baseName}${ext}`;
-                        const absoluteUrl = resolveUrl(cssFile);
-                        
-                        if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                        
-                        try {
-                            const content = await fetchResource(absoluteUrl, 'css');
-                            if (content) {
-                                results.css.content += content + '\n';
-                                results.css.fileCount++;
-                                results.css.byteCount += content.length;
-                                needMoreCSS = !hasEnoughResources('css');
-                            }
-                        } catch (error) {
-                            // File not found, continue
-                        }
-                    }
-                }
-            }
-        }
-        
-        if (needMoreJS && results.js.fileCount === 0) {
-            console.log("No JS files found, trying common JS filenames...");
-            const commonJsBaseNames = [
-                'script', 'scripts', 'main', 'app', 'index', 'custom', 'bundle', 'vendor'
-            ];
-            
-            const commonExtensions = ['.js', '.min.js', '.bundle.js', '.compiled.js'];
-            const commonPaths = ['', '/js/', '/scripts/', '/assets/js/', '/dist/js/', '/static/js/'];
-            
-            outerLoop: for (const path of commonPaths) {
-                for (const baseName of commonJsBaseNames) {
-                    if (!needMoreJS) break outerLoop;
-                    
-                    for (const ext of commonExtensions) {
-                        if (!needMoreJS) break;
-                        
-                        const jsFile = `${path}${baseName}${ext}`;
-                        const absoluteUrl = resolveUrl(jsFile);
-                        
-                        if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
-                        
-                        try {
-                            const content = await fetchResource(absoluteUrl, 'js');
-                            if (content) {
-                                results.js.content += content + '\n';
-                                results.js.fileCount++;
-                                results.js.byteCount += content.length;
-                                needMoreJS = !hasEnoughResources('js');
-                            }
-                        } catch (error) {
-                            // File not found, continue
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    return results;
+    return contents.join('\n');
 };
 
-// HTML evaluation with expanded checks
+// Enhanced HTML evaluation with categorical scoring
 const evaluateHTML = (htmlContent) => {
-    const feedback = [];
-    let score = 100;
-    // Semantic tags
-    const requiredTags = ['<header>', '<main>', '<footer>', '<title>', '<meta name="description">'];
-    requiredTags.forEach(tag => {
-        if (!new RegExp(tag).test(htmlContent)) {
-            score -= 10;
-            feedback.push(`Missing ${tag} for improved structure or SEO.`);
+    const $ = cheerio.load(htmlContent);
+    const result = {
+        score: 0,
+        categoryScores: {
+            semanticStructure: 0,
+            accessibility: 0,
+            modernPractices: 0,
+            performance: 0,
+            seo: 0
+        },
+        feedback: []
+    };
+    
+    // Semantic Structure (20 points)
+    const semanticStructure = { value: SCORING_CONFIG.html.semanticStructure, deductions: [] };
+    const semanticTags = ['header', 'main', 'footer', 'nav', 'section', 'article'];
+    const presentSemanticTags = semanticTags.filter(tag => $(tag).length > 0);
+    
+    if (presentSemanticTags.length === 0) {
+        semanticStructure.value = 0;
+        semanticStructure.deductions.push("No semantic HTML5 tags found. Use header, main, footer, etc.");
+    } else {
+        const deduction = Math.floor((semanticTags.length - presentSemanticTags.length) / semanticTags.length * semanticStructure.value);
+        semanticStructure.value -= deduction;
+        
+        if (deduction > 0) {
+            const missingTags = semanticTags.filter(tag => !presentSemanticTags.includes(tag));
+            semanticStructure.deductions.push(`Missing semantic tags: ${missingTags.join(', ')}`);
+        }
+    }
+    
+    // Document structure
+    if (!$('html').attr('lang')) {
+        semanticStructure.value -= 5;
+        semanticStructure.deductions.push("Missing lang attribute on <html> element");
+    }
+    
+    if (!$('title').length) {
+        semanticStructure.value -= 5;
+        semanticStructure.deductions.push("Missing <title> element");
+    }
+    
+    // Accessibility (20 points)
+    const accessibility = { value: SCORING_CONFIG.html.accessibility, deductions: [] };
+    
+    // Check alt attributes on images
+    const images = $('img');
+    const imagesWithoutAlt = images.filter((_, el) => !$(el).attr('alt'));
+    
+    if (images.length > 0 && imagesWithoutAlt.length > 0) {
+        const percentage = imagesWithoutAlt.length / images.length;
+        const deduction = Math.floor(percentage * 10);
+        accessibility.value -= deduction;
+        accessibility.deductions.push(`${imagesWithoutAlt.length} of ${images.length} images are missing alt attributes`);
+    }
+    
+    // Check form labels
+    const formInputs = $('input, select, textarea');
+    let inputsWithoutLabels = 0;
+    
+    formInputs.each((_, el) => {
+        const id = $(el).attr('id');
+        if (id && $(`label[for="${id}"]`).length === 0 && !$(el).attr('aria-label')) {
+            inputsWithoutLabels++;
         }
     });
-    // Accessibility and deprecated tags
-    if (!/<img[^>]+alt="[^"]*"/.test(htmlContent)) {
-        score -= 10;
-        feedback.push("Images are missing alt attributes for accessibility.");
+    
+    if (formInputs.length > 0 && inputsWithoutLabels > 0) {
+        const deduction = Math.min(10, inputsWithoutLabels * 2);
+        accessibility.value -= deduction;
+        accessibility.deductions.push(`${inputsWithoutLabels} form elements without proper labels`);
     }
-    if (/(<font>|<center>|<marquee>)/.test(htmlContent)) {
-        score -= 15;
-        feedback.push("Deprecated tags found (e.g., <font>, <center>); please remove.");
+    
+    // Check ARIA usage
+    if ($('[role]').length === 0 && $('[aria-]').length === 0 && formInputs.length > 0) {
+        accessibility.value -= 5;
+        accessibility.deductions.push("No ARIA attributes found for enhanced accessibility");
     }
-    // HTML length and readability
-    const htmlLines = htmlContent.split('\n').length;
-    if (htmlLines > 200) {
-        score -= 5;
-        feedback.push("HTML file is large; consider splitting into partials.");
+    
+    // Modern Practices (20 points)
+    const modernPractices = { value: SCORING_CONFIG.html.modernPractices, deductions: [] };
+    
+    // Check for deprecated elements
+    const deprecatedElements = ['font', 'center', 'marquee', 'frame', 'frameset', 'applet', 'basefont', 'big', 'blink', 'strike'];
+    const foundDeprecated = [];
+    
+    deprecatedElements.forEach(tag => {
+        if ($(tag).length > 0) {
+            foundDeprecated.push(tag);
+        }
+    });
+    
+    if (foundDeprecated.length > 0) {
+        const deduction = Math.min(20, foundDeprecated.length * 5);
+        modernPractices.value -= deduction;
+        modernPractices.deductions.push(`Deprecated HTML elements found: ${foundDeprecated.join(', ')}`);
     }
-    return { score, feedback };
+    
+    // Check for HTML5 DOCTYPE
+    if (!htmlContent.includes('<!DOCTYPE html>')) {
+        modernPractices.value -= 5;
+        modernPractices.deductions.push("Missing HTML5 DOCTYPE declaration");
+    }
+    
+    // Performance (20 points)
+    const performance = { value: SCORING_CONFIG.html.performance, deductions: [] };
+    
+    // Check inline styles
+    const inlineStyles = $('[style]').length;
+    if (inlineStyles > 5) {
+        const deduction = Math.min(10, Math.floor(inlineStyles / 5));
+        performance.value -= deduction;
+        performance.deductions.push(`${inlineStyles} elements with inline styles found`);
+    }
+    
+    // Check resource hints
+    if ($('link[rel="preload"], link[rel="prefetch"], link[rel="preconnect"]').length === 0) {
+        performance.value -= 5;
+        performance.deductions.push("No resource hints (preload, prefetch, preconnect) for performance optimization");
+    }
+    
+    // Check lazy loading
+    const lazyImages = $('img[loading="lazy"]').length;
+    const totalImages = $('img').length;
+    
+    if (totalImages > 3 && lazyImages === 0) {
+        performance.value -= 5;
+        performance.deductions.push("No lazy-loaded images found");
+    }
+    
+    // SEO (20 points)
+    const seo = { value: SCORING_CONFIG.html.seo, deductions: [] };
+    
+    // Check meta tags
+    if (!$('meta[name="description"]').length) {
+        seo.value -= 5;
+        seo.deductions.push("Missing meta description");
+    }
+    
+    if (!$('meta[name="viewport"]').length) {
+        seo.value -= 5;
+        seo.deductions.push("Missing viewport meta tag");
+    }
+    
+    // Check heading structure
+    if (!$('h1').length) {
+        seo.value -= 5;
+        seo.deductions.push("No H1 heading found");
+    }
+    
+    // Check heading hierarchy
+    const headings = [];
+    for (let i = 1; i <= 6; i++) {
+        $(`h${i}`).each((_, el) => {
+            headings.push({
+                level: i,
+                text: $(el).text().trim()
+            });
+        });
+    }
+    
+    let previousHeadingLevel = 0;
+    let hierarchyIssues = 0;
+    
+    headings.forEach(heading => {
+        if (heading.level > previousHeadingLevel + 1 && previousHeadingLevel !== 0) {
+            hierarchyIssues++;
+        }
+        previousHeadingLevel = heading.level;
+    });
+    
+    if (hierarchyIssues > 0) {
+        seo.value -= Math.min(5, hierarchyIssues);
+        seo.deductions.push("Heading hierarchy is not sequential");
+    }
+    
+    // Compile results
+    result.categoryScores = {
+        semanticStructure: Math.max(0, semanticStructure.value),
+        accessibility: Math.max(0, accessibility.value),
+        modernPractices: Math.max(0, modernPractices.value),
+        performance: Math.max(0, performance.value),
+        seo: Math.max(0, seo.value)
+    };
+    
+    // Add category-specific feedback
+    if (semanticStructure.deductions.length > 0) {
+        result.feedback.push(...semanticStructure.deductions.map(d => `[Structure] ${d}`));
+    }
+    
+    if (accessibility.deductions.length > 0) {
+        result.feedback.push(...accessibility.deductions.map(d => `[Accessibility] ${d}`));
+    }
+    
+    if (modernPractices.deductions.length > 0) {
+        result.feedback.push(...modernPractices.deductions.map(d => `[Best Practices] ${d}`));
+    }
+    
+    if (performance.deductions.length > 0) {
+        result.feedback.push(...performance.deductions.map(d => `[Performance] ${d}`));
+    }
+    
+    if (seo.deductions.length > 0) {
+        result.feedback.push(...seo.deductions.map(d => `[SEO] ${d}`));
+    }
+    
+    // Calculate overall score
+    result.score = Object.values(result.categoryScores).reduce((a, b) => a + b, 0);
+    
+    return result;
 };
 
-// Enhanced CSS evaluation for modularity and best practices
+// Enhanced CSS evaluation with categorical scoring
 const evaluateCSS = (cssContent) => {
-    try {
-        const results = csslint.verify(cssContent);
-        const feedback = [];
-        let score = 100;
-        results.messages.forEach(msg => {
-            const severity = msg.type === 'warning' ? 1 : 2;
-            score -= severity * 3;
-            feedback.push(`${msg.type.toUpperCase()}: ${msg.message} at line ${msg.line}`);
-        });
-        if (cssContent.includes('!important')) {
-            score -= 10;
-            feedback.push("Avoid using '!important' in CSS.");
-        }
-        if (cssContent.length > 5000) {
-            score -= 10;
-            feedback.push("CSS file is large; consider modularizing styles.");
-        }
-        return { score: Math.max(score, 0), feedback };
-    } catch (error) {
-        console.error("Error in CSS evaluation:", error);
-        return {
-            score: 50,
-            feedback: ["Error evaluating CSS: " + error.message]
-        };
+    const result = {
+        score: 0,
+        categoryScores: {
+            bestPractices: 0,
+            performance: 0,
+            organization: 0,
+            compatibility: 0
+        },
+        feedback: []
+    };
+    
+    if (!cssContent || cssContent.trim().length === 0) {
+        result.feedback.push("[Error] No CSS content to analyze");
+        return result;
     }
+    
+    // Run CSSlint
+    const lintResults = csslint.verify(cssContent);
+    
+    // Best Practices (25 points)
+    const bestPractices = { value: SCORING_CONFIG.css.bestPractices, deductions: [] };
+    
+    // Check for !important usage
+    const importantCount = (cssContent.match(/!important/g) || []).length;
+    if (importantCount > 0) {
+        const deduction = Math.min(15, importantCount * 3);
+        bestPractices.value -= deduction;
+        bestPractices.deductions.push(`Found ${importantCount} uses of '!important'`);
+    }
+    
+    // Check for inline styles (through linting)
+    const inlineErrors = lintResults.messages.filter(msg => 
+        msg.message.includes('inline') || msg.message.includes('Inline'));
+    
+    if (inlineErrors.length > 0) {
+        bestPractices.value -= Math.min(10, inlineErrors.length * 2);
+        bestPractices.deductions.push("CSS linting found issues with inline styles");
+    }
+    
+    // Check for selector specificity issues
+    const specificityIssues = lintResults.messages.filter(msg => 
+        msg.message.includes('specificity') || msg.message.includes('Selector'));
+    
+    if (specificityIssues.length > 0) {
+        bestPractices.value -= Math.min(10, specificityIssues.length * 2);
+        bestPractices.deductions.push(`${specificityIssues.length} issues with selector specificity detected`);
+    }
+    
+    // Performance (25 points)
+    const performance = { value: SCORING_CONFIG.css.performance, deductions: [] };
+    
+    // Check for universal selectors
+    const universalSelectors = (cssContent.match(/\*\s*{/g) || []).length;
+    if (universalSelectors > 0) {
+        performance.value -= Math.min(10, universalSelectors * 5);
+        performance.deductions.push(`Found ${universalSelectors} universal selectors (*)`);
+    }
+    
+    // Check for large file size
+    const cssSize = cssContent.length;
+    if (cssSize > 10000) {
+        performance.value -= Math.min(15, Math.floor(cssSize / 10000) * 5);
+        performance.deductions.push(`CSS file is large (${Math.round(cssSize/1024)}KB)`);
+    }
+    
+    // Check for complex selectors
+    const complexSelectors = (cssContent.match(/[^\s,]+\s+[^\s,]+\s+[^\s,]+\s+[^\s,]+/g) || []).length;
+    if (complexSelectors > 0) {
+        performance.value -= Math.min(10, complexSelectors);
+        performance.deductions.push(`Found ${complexSelectors} overly complex selectors (4+ levels deep)`);
+    }
+    
+    // Organization (25 points)
+    const organization = { value: SCORING_CONFIG.css.organization, deductions: [] };
+    
+    // Check for CSS comments and organization
+    const commentLines = (cssContent.match(/\/\*[\s\S]*?\*\//g) || []).length;
+    const totalLines = cssContent.split('\n').length;
+    
+    if (totalLines > 50 && commentLines < totalLines / 50) {
+        organization.value -= 10;
+        organization.deductions.push("Insufficient comments for CSS organization");
+    }
+    
+    // Check for consistent naming convention
+    const kebabCaseSelectors = (cssContent.match(/\.[a-z0-9]+(-[a-z0-9]+)*/g) || []).length;
+    const camelCaseSelectors = (cssContent.match(/\.[a-z]+[A-Z][a-z0-9]*/g) || []).length;
+    const snakeCaseSelectors = (cssContent.match(/\.[a-z0-9]+(_[a-z0-9]+)*/g) || []).length;
+    
+    const totalSelectors = kebabCaseSelectors + camelCaseSelectors + snakeCaseSelectors;
+    if (totalSelectors > 10) {
+        const max = Math.max(kebabCaseSelectors, camelCaseSelectors, snakeCaseSelectors);
+        const consistencyRatio = max / totalSelectors;
+        
+        if (consistencyRatio < 0.7) {
+            organization.value -= 15;
+            organization.deductions.push("Inconsistent naming conventions in CSS selectors");
+        }
+    }
+    
+    // Compatibility (25 points)
+    const compatibility = { value: SCORING_CONFIG.css.compatibility, deductions: [] };
+    
+    // Check for vendor prefixes
+    const vendorPrefixes = (cssContent.match(/-(webkit|moz|ms|o)-/g) || []).length;
+    const newCSSFeatures = (cssContent.match(/(flex|grid|sticky|calc|var\(|@supports)/g) || []).length;
+    
+    if (newCSSFeatures > 0 && vendorPrefixes === 0) {
+        compatibility.value -= 10;
+        compatibility.deductions.push("Modern CSS features used without vendor prefixes");
+    }
+    
+    // Check for @supports rules
+    if (cssContent.includes('grid') || cssContent.includes('flex') || cssContent.includes('sticky')) {
+        if (!cssContent.includes('@supports')) {
+            compatibility.value -= 5;
+            compatibility.deductions.push("Modern layout features used without @supports fallbacks");
+        }
+    }
+    
+    // Compile results
+    result.categoryScores = {
+        bestPractices: Math.max(0, bestPractices.value),
+        performance: Math.max(0, performance.value),
+        organization: Math.max(0, organization.value),
+        compatibility: Math.max(0, compatibility.value)
+    };
+    
+    // Add category-specific feedback
+    if (bestPractices.deductions.length > 0) {
+        result.feedback.push(...bestPractices.deductions.map(d => `[Best Practices] ${d}`));
+    }
+    
+    if (performance.deductions.length > 0) {
+        result.feedback.push(...performance.deductions.map(d => `[Performance] ${d}`));
+    }
+    
+    if (organization.deductions.length > 0) {
+        result.feedback.push(...organization.deductions.map(d => `[Organization] ${d}`));
+    }
+    
+    if (compatibility.deductions.length > 0) {
+        result.feedback.push(...compatibility.deductions.map(d => `[Compatibility] ${d}`));
+    }
+    
+    // Add selected linting issues
+    const significantLintIssues = lintResults.messages
+        .filter(msg => msg.type === 'error' || 
+                      (msg.type === 'warning' && 
+                       !msg.message.includes('Known properties') && 
+                       !msg.message.includes('Heading')))
+        .slice(0, 5); // Limit to top 5 issues
+    
+    if (significantLintIssues.length > 0) {
+        result.feedback.push(...significantLintIssues.map(msg => 
+            `[${msg.type === 'error' ? 'Error' : 'Warning'}] ${msg.message} at line ${msg.line}`
+        ));
+    }
+    
+    // Calculate overall score
+    result.score = Object.values(result.categoryScores).reduce((a, b) => a + b, 0);
+    
+    return result;
 };
 
-// Enhanced JavaScript evaluation
+// Enhanced JavaScript evaluation with categorical scoring
 const evaluateJavaScript = async (jsContent) => {
-    try {
-        const eslint = new ESLint();
-        const [result] = await eslint.lintText(jsContent);
-        const feedback = [];
-        let score = 100;
-        result.messages.forEach(msg => {
-            const severity = msg.severity;
-            score -= severity * 5;
-            feedback.push(`${severity === 1 ? 'Warning' : 'Error'}: ${msg.message} at line ${msg.line}`);
-        });
-        if (jsContent.split('\n').length > 400) {
-            score -= 10;
-            feedback.push("JavaScript file is large; consider modularizing.");
-        }
-        if ((jsContent.match(/console\./g) || []).length > 0) {
-            score -= 5;
-            feedback.push("Avoid using console logs in production code.");
-        }
-        return { score: Math.max(score, 0), feedback };
-    } catch (error) {
-        console.error("Error in JavaScript evaluation:", error);
-        return {
-            score: 50,
-            feedback: ["Error evaluating JavaScript: " + error.message]
-        };
+    const result = {
+        score: 0,
+        categoryScores: {
+            codeQuality: 0,
+            performance: 0,
+            modularity: 0,
+            security: 0,
+            bestPractices: 0
+        },
+        feedback: []
+    };
+    
+    if (!jsContent || jsContent.trim().length === 0) {
+        result.feedback.push("[Error] No JavaScript content to analyze");
+        return result;
     }
+    
+    // Run ESLint
+    const eslint = new ESLint();
+    const lintResults = await eslint.lintText(jsContent).catch(err => {
+        console.error("ESLint error:", err);
+        return [{ messages: [] }];
+    });
+    
+    const lintIssues = lintResults[0]?.messages || [];
+    
+    // Code Quality (20 points)
+    const codeQuality = { value: SCORING_CONFIG.javascript.codeQuality, deductions: [] };
+    
+    // Check for ESLint errors and warnings
+    const errors = lintIssues.filter(msg => msg.severity === 2);
+    const warnings = lintIssues.filter(msg => msg.severity === 1);
+    
+    if (errors.length > 0) {
+        const deduction = Math.min(15, errors.length * 2);
+        codeQuality.value -= deduction;
+        codeQuality.deductions.push(`${errors.length} ESLint errors detected`);
+    }
+    
+    if (warnings.length > 0) {
+        const deduction = Math.min(5, warnings.length);
+        codeQuality.value -= deduction;
+        codeQuality.deductions.push(`${warnings.length} ESLint warnings detected`);
+    }
+    
+    // Check for code complexity
+    const funcRegex = /function\s*\w*\s*\([^)]*\)\s*{|\([^)]*\)\s*=>\s*{|\([^)]*\)\s*=>/g;
+    const functions = jsContent.match(funcRegex) || [];
+    
+    if (functions.length > 20) {
+        codeQuality.value -= 5;
+        codeQuality.deductions.push("High number of functions may indicate complexity issues");
+    }
+    
+    // Performance (20 points)
+    const performance = { value: SCORING_CONFIG.javascript.performance, deductions: [] };
+    
+    // Check for inefficient DOM selectors
+    const inefficientSelectors = (jsContent.match(/document\.getElementsByClassName|document\.querySelectorAll/g) || []).length;
+    if (inefficientSelectors > 5) {
+        performance.value -= Math.min(10, inefficientSelectors);
+        performance.deductions.push(`${inefficientSelectors} potentially inefficient DOM selectors`);
+    }
+    
+    // Check for memory leaks (event listeners)
+    const addEventListeners = (jsContent.match(/addEventListener/g) || []).length;
+    const removeEventListeners = (jsContent.match(/removeEventListener/g) || []).length;
+    
+    if (addEventListeners > 5 && removeEventListeners === 0) {
+        performance.value -= 10;
+        performance.deductions.push("Event listeners added without corresponding removal");
+    }
+    
+    // Check for performance-intensive operations
+    const forInLoops = (jsContent.match(/for\s*\(\s*\w+\s+in\s+/g) || []).length;
+    if (forInLoops > 3) {
+        performance.value -= 5;
+        performance.deductions.push(`${forInLoops} for...in loops which may be inefficient`);
+    }
+    
+    // Modularity (20 points)
+    const modularity = { value: SCORING_CONFIG.javascript.modularity, deductions: [] };
+    
+    // Check file size
+    const jsLines = jsContent.split('\n').length;
+    if (jsLines > 300) {
+        modularity.value -= 10;
+        modularity.deductions.push(`Large JavaScript file (${jsLines} lines) - consider modularization`);
+    }
+    
+    // Check for ES modules usage
+    const importsExports = (jsContent.match(/import\s+|export\s+/g) || []).length;
+    if (jsLines > 100 && importsExports === 0) {
+        modularity.value -= 10;
+        modularity.deductions.push("No ES modules (import/export) found in large file");
+    }
+    
+    // Security (20 points)
+    const security = { value: SCORING_CONFIG.javascript.security, deductions: [] };
+    
+    // Check for eval usage
+    const evalUsage = (jsContent.match(/eval\s*\(/g) || []).length;
+    if (evalUsage > 0) {
+        security.value -= 15;
+        security.deductions.push(`Found ${evalUsage} uses of eval() which is a security risk`);
+    }
+    
+    // Check for innerHTML
+    const innerHTMLUsage = (jsContent.match(/\.innerHTML\s*=/g) || []).length;
+    if (innerHTMLUsage > 0) {
+        security.value -= Math.min(10, innerHTMLUsage * 2);
+        security.deductions.push(`Found ${innerHTMLUsage} uses of innerHTML without sanitization`);
+    }
+    
+    // Best Practices (20 points)
+    const bestPractices = { value: SCORING_CONFIG.javascript.bestPractices, deductions: [] };
+    
+    // Check for console statements
+    const consoleStatements = (jsContent.match(/console\.(log|warn|error|info|debug)/g) || []).length;
+    if (consoleStatements > 0) {
+        bestPractices.value -= Math.min(5, consoleStatements);
+        bestPractices.deductions.push(`Found ${consoleStatements} console statements`);
+    }
+    
+    // Check for use strict
+    if (!jsContent.includes('"use strict"') && !jsContent.includes("'use strict'")) {
+        bestPractices.value -= 5;
+        bestPractices.deductions.push("Missing 'use strict' directive");
+    }
+    
+    // Check for commented code
+    const commentedCodeLines = (jsContent.match(/\/\/.*\w+\s*\(|\/\*[\s\S]*?\*\//g) || []).length;
+    if (commentedCodeLines > 5) {
+        bestPractices.value -= 5;
+        bestPractices.deductions.push("Significant amount of commented-out code found");
+    }
+    
+    // Compile results
+    result.categoryScores = {
+        codeQuality: Math.max(0, codeQuality.value),
+        performance: Math.max(0, performance.value),
+        modularity: Math.max(0, modularity.value),
+        security: Math.max(0, security.value),
+        bestPractices: Math.max(0, bestPractices.value)
+    };
+    
+    // Add category-specific feedback
+    if (codeQuality.deductions.length > 0) {
+        result.feedback.push(...codeQuality.deductions.map(d => `[Code Quality] ${d}`));
+    }
+    
+    if (performance.deductions.length > 0) {
+        result.feedback.push(...performance.deductions.map(d => `[Performance] ${d}`));
+    }
+    
+    if (modularity.deductions.length > 0) {
+        result.feedback.push(...modularity.deductions.map(d => `[Modularity] ${d}`));
+    }
+    
+    if (security.deductions.length > 0) {
+        result.feedback.push(...security.deductions.map(d => `[Security] ${d}`));
+    }
+    
+    if (bestPractices.deductions.length > 0) {
+        result.feedback.push(...bestPractices.deductions.map(d => `[Best Practices] ${d}`));
+    }
+    
+    // Add selected linting issues (top 5 most severe)
+    const significantLintIssues = lintIssues
+        .sort((a, b) => b.severity - a.severity)
+        .slice(0, 5);
+    
+    if (significantLintIssues.length > 0) {
+        result.feedback.push(...significantLintIssues.map(msg => 
+            `[${msg.severity === 2 ? 'Error' : 'Warning'}] ${msg.message} at line ${msg.line}`
+        ));
+    }
+    
+    // Calculate overall score
+    result.score = Object.values(result.categoryScores).reduce((a, b) => a + b, 0);
+    
+    return result;
+};
+
+// Generate overall site score and improvement recommendations
+const generateOverallAssessment = (htmlResults, cssResults, jsResults) => {
+    const overallScore = Math.round((htmlResults.score + cssResults.score + jsResults.score) / 3);
+    
+    // Determine strengths and weaknesses
+    const allCategoryScores = {
+        ...htmlResults.categoryScores,
+        ...cssResults.categoryScores,
+        ...jsResults.categoryScores
+    };
+    
+    const sortedCategories = Object.entries(allCategoryScores)
+        .sort((a, b) => b[1] - a[1]);
+    
+    const strengths = sortedCategories
+        .filter(([_, score]) => score >= 15)
+        .slice(0, 3)
+        .map(([category]) => category);
+    
+    const weaknesses = sortedCategories
+        .filter(([_, score]) => score < 15)
+        .sort((a, b) => a[1] - b[1])
+        .slice(0, 3)
+        .map(([category]) => category);
+    
+    // Generate improvement recommendations
+    const recommendations = [];
+    
+    if (weaknesses.includes('semanticStructure') || weaknesses.includes('accessibility')) {
+        recommendations.push("Improve HTML structure with proper semantic tags and accessibility attributes");
+    }
+    
+    if (weaknesses.includes('performance')) {
+        recommendations.push("Optimize performance by minimizing resource size and improving loading strategy");
+    }
+    
+    if (weaknesses.includes('bestPractices') || weaknesses.includes('codeQuality')) {
+        recommendations.push("Follow industry best practices and improve code quality across HTML, CSS, and JavaScript");
+    }
+    
+    if (weaknesses.includes('security')) {
+        recommendations.push("Address security concerns in JavaScript by avoiding unsafe methods like eval() and innerHTML");
+    }
+    
+    if (weaknesses.includes('organization') || weaknesses.includes('modularity')) {
+        recommendations.push("Better organize code with clear structure, comments, and modular approach");
+    }
+    
+    return {
+        overallScore,
+        strengths: strengths.length > 0 ? strengths : ["No notable strengths identified"],
+        weaknesses: weaknesses.length > 0 ? weaknesses : ["No notable weaknesses identified"],
+        recommendations: recommendations.length > 0 ? recommendations : ["Continue following web development best practices"]
+    };
 };
 
 app.post('/analyze', async (req, res) => {
     const { url } = req.body;
     
     if (!url) {
-        return res.status(400).json({ error: "Please provide a URL to analyze" });
+        return res.status(400).json({ 
+            error: "Please provide a URL to analyze" 
+        });
     }
     
     try {
-        console.log(`Starting analysis of ${url}`);
+        // Validate URL is accessible
+        const { status } = await axios.head(url, { 
+            timeout: 5000,
+            validateStatus: (status) => status < 500 // Accept any status below 500
+        }).catch(() => ({ status: 404 }));
         
-        // Validate URL format
-        let validUrl;
-        try {
-            validUrl = new URL(url);
-        } catch (error) {
-            return res.status(400).json({ error: "Invalid URL format" });
-        }
-        
-        // Check if URL is accessible
-        try {
-            console.log(`Checking if URL is accessible: ${url}`);
-            const { status } = await axios.head(url, { 
-                timeout: 8000,
-                validateStatus: (status) => status < 500,
-                headers: {'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0'}
+        if (status >= 400) {
+            return res.status(400).json({ 
+                error: "The provided URL is not reachable (status: " + status + ")" 
             });
-            
-            if (status >= 400) {
-                return res.status(400).json({ 
-                    error: `The provided URL is not reachable (status: ${status})` 
-                });
-            }
-        } catch (error) {
-            console.log(`Error checking URL: ${error.message}`);
-            // Continue anyway - some servers block HEAD requests but allow GET
         }
+        
+        console.log(`Analyzing URL: ${url}`);
         
         // Fetch HTML content
-        console.log(`Fetching HTML content from ${url}`);
+       // Fetch HTML content
         const { data: htmlData } = await axios.get(url, {
-            timeout: 15000,
-            headers: {'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0'}
+            timeout: 10000,
+            headers: {'User-Agent': 'SkifolioAnalyzer/1.0'}
         });
+        
+        const $ = cheerio.load(htmlData);
         
         // HTML Analysis
         console.log("Starting HTML analysis...");
         const htmlResults = evaluateHTML(htmlData);
         console.log(`HTML analysis complete. Score: ${htmlResults.score}`);
         
-        // Discover and fetch all CSS and JS resources
-        console.log("Starting resource discovery and fetching...");
-        const resources = await discoverAndFetchResources(htmlData, url);
-        console.log(`Resource discovery complete. Found ${resources.css.fileCount} CSS files and ${resources.js.fileCount} JS files`);
-        
         // CSS Analysis
-        console.log(`Starting CSS analysis with ${resources.css.byteCount} bytes of content...`);
-        let cssResults;
-        if (resources.css.content && resources.css.content.trim().length > 0) {
-            cssResults = evaluateCSS(resources.css.content);
-            console.log(`CSS analysis complete. Score: ${cssResults.score}`);
-        } else {
-            console.warn("No CSS content found to analyze");
-            cssResults = {
-                score: 0,
-                feedback: ["No CSS content found to analyze"]
-            };
-        }
+        console.log("Starting CSS analysis...");
+        const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
+        const inlineCSS = $('style').map((_, el) => $(el).text()).get().join('\n');
         
-        // JS Analysis
-        console.log(`Starting JavaScript analysis with ${resources.js.byteCount} bytes of content...`);
+        const cssContent = inlineCSS + await fetchExternalFiles(cssLinks, url);
+        console.log(`Combined CSS Content Length: ${cssContent.length} bytes`);
+        
+        const cssResults = evaluateCSS(cssContent);
+        console.log(`CSS analysis complete. Score: ${cssResults.score}`);
+        
+        // JavaScript Analysis
+        console.log("Starting JavaScript analysis...");
+        const jsLinks = $('script[src]').map((_, el) => $(el).attr('src')).get()
+            .filter(src => !src.includes('analytics') && !src.includes('tracking')); // Skip analytics scripts
+            
+        const inlineJS = $('script:not([src])').map((_, el) => $(el).text()).get().join('\n');
+        
+        const jsContent = inlineJS + await fetchExternalFiles(jsLinks, url);
+        console.log(`Combined JavaScript Content Length: ${jsContent.length} bytes`);
+        
         let jsResults;
-        if (resources.js.content && resources.js.content.trim().length > 0) {
-            jsResults = await evaluateJavaScript(resources.js.content);
+        try {
+            jsResults = await evaluateJavaScript(jsContent);
             console.log(`JavaScript analysis complete. Score: ${jsResults.score}`);
-        } else {
-            console.warn("No JavaScript content found to analyze");
+        } catch (error) {
+            console.error("Error during JavaScript evaluation:", error);
             jsResults = {
                 score: 0,
-                feedback: ["No JavaScript content found to analyze"]
+                categoryScores: {
+                    codeQuality: 0,
+                    performance: 0,
+                    modularity: 0,
+                    security: 0,
+                    bestPractices: 0
+                },
+                feedback: ["Error analyzing JavaScript: " + error.message]
             };
         }
         
-        // Calculate overall score
-        const overallScore = Math.round((htmlResults.score + cssResults.score + jsResults.score) / 3);
+        // Generate overall assessment
+        const overallAssessment = generateOverallAssessment(htmlResults, cssResults, jsResults);
         
         // Prepare response
         const response = {
             url,
             timestamp: new Date().toISOString(),
             scores: {
-                overall: overallScore,
+                overall: overallAssessment.overallScore,
                 html: htmlResults.score,
                 css: cssResults.score,
                 javascript: jsResults.score
+            },
+            categoryScores: {
+                html: htmlResults.categoryScores,
+                css: cssResults.categoryScores,
+                javascript: jsResults.categoryScores
+            },
+            assessment: {
+                strengths: overallAssessment.strengths,
+                weaknesses: overallAssessment.weaknesses,
+                recommendations: overallAssessment.recommendations
             },
             feedback: {
                 html: htmlResults.feedback,
                 css: cssResults.feedback,
                 javascript: jsResults.feedback
-            },
-            resources: {
-                cssFiles: resources.css.fileCount,
-                jsFiles: resources.js.fileCount,
-                cssBytes: resources.css.byteCount,
-                jsBytes: resources.js.byteCount
             }
         };
         
-        console.log(`Analysis complete for ${url}`);
         res.json(response);
         
     } catch (error) {
-       console.error("Error analyzing URL:", error);
-        res.status(500).json({
-            error: "An error occurred while analyzing the website",
-            message: error.message || "Unknown error"
+        console.error("Error analyzing URL:", error);
+        res.status(500).json({ 
+            error: "Failed to analyze the website",
+            details: error.message
         });
     }
 });
 
-// Health check endpoint
+// Add a simple health check endpoint
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', version: '1.0.0' });
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Documentation endpoint
-app.get('/', (req, res) => {
-    res.send(`
-        <html>
-            <head>
-                <title>Skifolio Analyzer API</title>
-                <style>
-                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                    h1 { color: #333; }
-                    code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
-                </style>
-            </head>
-            <body>
-                <h1>Skifolio Website Analyzer API</h1>
-                <p>Welcome to the Skifolio website analyzer API. This service analyzes HTML, CSS, and JavaScript of websites.</p>
-                
-                <h2>Endpoints:</h2>
-                <h3>POST /analyze</h3>
-                <p>Submit a URL for analysis.</p>
-                <pre><code>
-                POST /analyze
-                Content-Type: application/json
-                
-                {
-                    "url": "https://example.com"
-                }
-                </code></pre>
-                
-                <h3>GET /health</h3>
-                <p>Check if the API is running properly.</p>
-                
-                <p>For more information, visit <a href="https://skifolio.netlify.app">Skifolio</a></p>
-            </body>
-        </html>
-    `);
+// Add a simple version endpoint
+app.get('/version', (req, res) => {
+    res.status(200).json({ 
+        version: '1.1.0',
+        name: 'Skifolio Web Analyzer',
+        features: ['HTML analysis', 'CSS analysis', 'JavaScript analysis']
+    });
 });
 
-// Handle 404 errors
-app.use((req, res) => {
-    res.status(404).json({ error: "Endpoint not found" });
-});
-
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Skifolio API server running on port ${PORT}`);
-    console.log(`API is available at http://localhost:${PORT}`);
-});
-
-// Graceful shutdown
-const shutdown = () => {
-    console.log('Shutting down server gracefully...');
-    process.exit(0);
-};
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+app.listen(PORT, () => console.log(`Web Analyzer server running on port ${PORT}`));
