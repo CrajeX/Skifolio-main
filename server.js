@@ -26,6 +26,9 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         js: { content: '', fileCount: 0, byteCount: 0 }
     };
     
+    // Track processed URLs to avoid duplicates
+    const processedUrls = new Set();
+    
     // Utility function to resolve URLs properly
     const resolveUrl = (linkPath) => {
         try {
@@ -53,8 +56,50 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         }
     };
     
+    // Improved function to check if a URL likely points to a CSS or JS file
+    const isResourceType = (url, type) => {
+        if (!url) return false;
+        
+        // Check file extension
+        const hasExtension = type === 'css' 
+            ? url.match(/\.css($|\?|#)/) 
+            : url.match(/\.js($|\?|#)/);
+            
+        if (hasExtension) return true;
+        
+        // Check URL path indicators
+        const pathIndicators = type === 'css'
+            ? ['css', 'style', 'theme', 'layout', 'design']
+            : ['js', 'script', 'bundle', 'app', 'main'];
+            
+        for (const indicator of pathIndicators) {
+            if (url.includes(`/${indicator}/`) || url.includes(`/${indicator}.`)) {
+                return true;
+            }
+        }
+        
+        // Check for telltale query parameters
+        if (url.includes('?') && (
+            url.includes('type=text/css') || 
+            url.includes('type=text/javascript') ||
+            url.includes('resource=style') ||
+            url.includes('resource=script')
+        )) {
+            return true;
+        }
+        
+        return false;
+    };
+    
     // Fetch a single resource with robust error handling
     const fetchResource = async (url, type) => {
+        // Skip if already processed
+        if (processedUrls.has(url)) {
+            return '';
+        }
+        
+        processedUrls.add(url);
+        
         try {
             const response = await axios.get(url, { 
                 timeout: 8000,
@@ -64,10 +109,28 @@ const discoverAndFetchResources = async (htmlContent, url) => {
                         ? 'text/css,*/*' 
                         : 'application/javascript,text/javascript,*/*'
                 },
-                validateStatus: status => status < 400
+                validateStatus: status => status < 400,
+                responseType: 'text'
             });
             
             if (response.data && typeof response.data === 'string') {
+                // For CSS, check content type as an additional verification
+                if (type === 'css' && response.headers['content-type'] && 
+                    !response.headers['content-type'].includes('text/css') && 
+                    !url.endsWith('.css')) {
+                    console.warn(`Skipping non-CSS content from: ${url} (Content-Type: ${response.headers['content-type']})`);
+                    return '';
+                }
+                
+                // For JS, check content type as an additional verification
+                if (type === 'js' && response.headers['content-type'] && 
+                    !response.headers['content-type'].includes('javascript') && 
+                    !response.headers['content-type'].includes('application/json') && 
+                    !url.endsWith('.js')) {
+                    console.warn(`Skipping non-JS content from: ${url} (Content-Type: ${response.headers['content-type']})`);
+                    return '';
+                }
+                
                 console.log(`Successfully fetched ${type} from: ${url} (${response.data.length} bytes)`);
                 return response.data;
             } else {
@@ -114,6 +177,37 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         }
     };
     
+    // Use HEAD request to verify if URL is a JS or CSS file
+    const verifyResourceType = async (url, type) => {
+        try {
+            const response = await axios.head(url, {
+                timeout: 5000,
+                headers: { 'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0' },
+                validateStatus: status => status === 200
+            });
+            
+            const contentType = response.headers['content-type'] || '';
+            if (type === 'css' && contentType.includes('text/css')) {
+                return true;
+            }
+            if (type === 'js' && (
+                contentType.includes('javascript') || 
+                contentType.includes('application/json')
+            )) {
+                return true;
+            }
+            
+            // Fallback to file extension if content-type is missing or ambiguous
+            if (url.endsWith(`.${type}`)) {
+                return true;
+            }
+            
+            return false;
+        } catch (error) {
+            return false;
+        }
+    };
+    
     // 1. Get explicitly linked CSS files
     const cssLinks = $('link[rel="stylesheet"]').map((_, el) => $(el).attr('href')).get();
     console.log(`Found ${cssLinks.length} linked CSS files`);
@@ -155,105 +249,286 @@ const discoverAndFetchResources = async (htmlContent, url) => {
         console.log(`Added ${inlineJS.length} bytes of inline JavaScript`);
     }
     
-    // 6. Look for other resources by scanning the page content
-    // First, look for additional CSS files that might be loaded dynamically
-    const additionalCssRegex = /(?:href=["'](.*?\.css)["']|import\s+["'](.*?\.css)["']|loadCSS\(["'](.*?\.css)["'])/g;
-    let cssMatch;
-    const additionalCssFiles = new Set();
+    // 6. Enhanced regex search for both CSS and JS resources in HTML
+    // This captures any file ending with .css or .js in multiple contexts
+    const cssJsRegex = /(?:["'\(]\s*)((?:https?:)?\/\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|\/[^"'\s\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?|[^"'\s\/\)]+\.(?:css|js)(?:\?[^"'\s\)]*)?)/g;
+    let match;
+    const cssFilesFound = new Set();
+    const jsFilesFound = new Set();
     
-    while ((cssMatch = additionalCssRegex.exec(htmlContent)) !== null) {
-        const cssFile = cssMatch[1] || cssMatch[2] || cssMatch[3];
-        if (cssFile && !cssLinks.includes(cssFile)) {
-            additionalCssFiles.add(cssFile);
+    console.log("Scanning HTML content for .css and .js references...");
+    while ((match = cssJsRegex.exec(htmlContent)) !== null) {
+        if (match[1]) {
+            const resourcePath = match[1].trim();
+            const absoluteUrl = resolveUrl(resourcePath);
+            
+            // Skip already processed URLs
+            if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+            
+            // Categorize by file extension
+            if (resourcePath.match(/\.css($|\?|#)/)) {
+                cssFilesFound.add(absoluteUrl);
+            } else if (resourcePath.match(/\.js($|\?|#)/)) {
+                jsFilesFound.add(absoluteUrl);
+            }
         }
     }
     
-    console.log(`Found ${additionalCssFiles.size} additional CSS files via regex scanning`);
-    await fetchAllResources(Array.from(additionalCssFiles), 'css');
+    console.log(`Found ${cssFilesFound.size} additional CSS files via regex scanning`);
+    await fetchAllResources(Array.from(cssFilesFound), 'css');
     
-    // Next, look for additional JS files that might be loaded dynamically
-    const additionalJsRegex = /(?:src=["'](.*?\.js)["']|import\(["'](.*?\.js)["']\)|loadScript\(["'](.*?\.js)["']\))/g;
-    let jsMatch;
-    const additionalJsFiles = new Set();
+    console.log(`Found ${jsFilesFound.size} additional JS files via regex scanning`);
+    await fetchAllResources(Array.from(jsFilesFound), 'js');
     
-    while ((jsMatch = additionalJsRegex.exec(htmlContent)) !== null) {
-        const jsFile = jsMatch[1] || jsMatch[2] || jsMatch[3];
-        if (jsFile && !jsLinks.includes(jsFile)) {
-            additionalJsFiles.add(jsFile);
-        }
-    }
+    // 7. Search for dynamic resource loading patterns
+    const dynamicPatterns = [
+        /loadCSS\s*\(\s*['"]([^'"]+)['"]/g,
+        /appendStylesheet\s*\(\s*['"]([^'"]+)['"]/g,
+        /loadScript\s*\(\s*['"]([^'"]+)['"]/g,
+        /import\s*\(\s*['"]([^'"]+)['"]/g,
+        /require\s*\(\s*['"]([^'"]+)['"]/g,
+        /createElement\s*\(\s*['"]link['"]\)[^}]*href\s*=\s*['"]([^'"]+)['"]/g,
+        /createElement\s*\(\s*['"]script['"]\)[^}]*src\s*=\s*['"]([^'"]+)['"]/g,
+        /\.src\s*=\s*['"]([^'"]+)['"]/g,
+        /\.href\s*=\s*['"]([^'"]+)['"]/g
+    ];
     
-    console.log(`Found ${additionalJsFiles.size} additional JS files via regex scanning`);
-    await fetchAllResources(Array.from(additionalJsFiles), 'js');
+    const dynamicResources = new Set();
     
-    // 7. If still not found enough resources, try guessing common filenames
-    if (results.css.fileCount === 0) {
-        console.log("No CSS files found, trying common filenames...");
-        const commonCssFiles = [
-            'style.css', 'styles.css', 'main.css', 'app.css', 'custom.css', 
-            'css/style.css', 'css/main.css', 'css/app.css', 'assets/css/style.css'
-        ];
-        
-        for (const cssFile of commonCssFiles) {
-            const absoluteUrl = resolveUrl(cssFile);
-            try {
-                const response = await axios.head(absoluteUrl, { 
-                    timeout: 2000,
-                    validateStatus: status => status === 200
-                });
+    for (const pattern of dynamicPatterns) {
+        let dynMatch;
+        while((dynMatch = pattern.exec(htmlContent)) !== null) {
+            if (dynMatch[1]) {
+                const resourcePath = dynMatch[1].trim();
+                const absoluteUrl = resolveUrl(resourcePath);
                 
-                if (response.status === 200) {
-                    console.log(`Found common CSS file: ${absoluteUrl}`);
-                    const content = await fetchResource(absoluteUrl, 'css');
-                    if (content) {
-                        results.css.content += content + '\n';
-                        results.css.fileCount++;
-                        results.css.byteCount += content.length;
+                if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                
+                dynamicResources.add(absoluteUrl);
+            }
+        }
+    }
+    
+    console.log(`Found ${dynamicResources.size} potential dynamic resources`);
+    
+    // Verify and categorize dynamic resources
+    for (const resourceUrl of dynamicResources) {
+        // Skip URLs that are clearly not CSS or JS
+        if (resourceUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|webm)($|\?|#)/i)) {
+            continue;
+        }
+        
+        // First check by file extension
+        if (resourceUrl.match(/\.css($|\?|#)/i)) {
+            const content = await fetchResource(resourceUrl, 'css');
+            if (content) {
+                results.css.content += content + '\n';
+                results.css.fileCount++;
+                results.css.byteCount += content.length;
+            }
+        } else if (resourceUrl.match(/\.js($|\?|#)/i)) {
+            const content = await fetchResource(resourceUrl, 'js');
+            if (content) {
+                results.js.content += content + '\n';
+                results.js.fileCount++;
+                results.js.byteCount += content.length;
+            }
+        } else {
+            // For URLs without clear extensions, try to determine by content type
+            const isCss = await verifyResourceType(resourceUrl, 'css');
+            if (isCss) {
+                const content = await fetchResource(resourceUrl, 'css');
+                if (content) {
+                    results.css.content += content + '\n';
+                    results.css.fileCount++;
+                    results.css.byteCount += content.length;
+                }
+                continue;
+            }
+            
+            const isJs = await verifyResourceType(resourceUrl, 'js');
+            if (isJs) {
+                const content = await fetchResource(resourceUrl, 'js');
+                if (content) {
+                    results.js.content += content + '\n';
+                    results.js.fileCount++;
+                    results.js.byteCount += content.length;
+                }
+            }
+        }
+    }
+    
+    // 8. Crawl for assets in common directories
+    const commonDirectories = [
+        '/assets/', '/static/', '/public/', '/dist/', '/build/', 
+        '/js/', '/css/', '/styles/', '/scripts/', '/resources/'
+    ];
+    
+    console.log("Checking common directories for additional resources...");
+    for (const directory of commonDirectories) {
+        const directoryUrl = `${baseUrlObj.origin}${directory}`;
+        
+        try {
+            // Try to fetch the directory listing
+            const response = await axios.get(directoryUrl, {
+                timeout: 5000,
+                headers: { 'User-Agent': 'Mozilla/5.0 SkifolioAnalyzer/1.0' },
+                validateStatus: status => status === 200
+            });
+            
+            if (response.data && typeof response.data === 'string') {
+                // Extract links to .css and .js files from directory listing
+                const $dir = cheerio.load(response.data);
+                const directoryLinks = $dir('a').map((_, el) => $dir(el).attr('href')).get();
+                
+                for (const link of directoryLinks) {
+                    if (!link) continue;
+                    
+                    const resourceUrl = resolveUrl(
+                        link.startsWith('/') ? link : `${directory}${link}`
+                    );
+                    
+                    if (!resourceUrl || processedUrls.has(resourceUrl)) continue;
+                    
+                    if (resourceUrl.match(/\.css($|\?|#)/i)) {
+                        const content = await fetchResource(resourceUrl, 'css');
+                        if (content) {
+                            results.css.content += content + '\n';
+                            results.css.fileCount++;
+                            results.css.byteCount += content.length;
+                        }
+                    } else if (resourceUrl.match(/\.js($|\?|#)/i)) {
+                        const content = await fetchResource(resourceUrl, 'js');
+                        if (content) {
+                            results.js.content += content + '\n';
+                            results.js.fileCount++;
+                            results.js.byteCount += content.length;
+                        }
                     }
                 }
-            } catch (error) {
-                // Silently continue if file not found
+            }
+        } catch (error) {
+            // Directory listing not available or access forbidden
+        }
+    }
+    
+    // 9. If no CSS/JS found, try common filenames with any extension
+    if (results.css.fileCount === 0) {
+        console.log("No CSS files found, trying common CSS filenames with any extension...");
+        const commonCssBaseNames = [
+            'style', 'styles', 'main', 'app', 'custom', 'theme', 'layout', 'global'
+        ];
+        
+        const commonExtensions = ['.css', '.min.css', '.bundle.css', '.compiled.css'];
+        const commonPaths = ['', '/css/', '/styles/', '/assets/css/', '/dist/css/', '/static/css/'];
+        
+        for (const path of commonPaths) {
+            for (const baseName of commonCssBaseNames) {
+                for (const ext of commonExtensions) {
+                    const cssFile = `${path}${baseName}${ext}`;
+                    const absoluteUrl = resolveUrl(cssFile);
+                    
+                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                    
+                    try {
+                        const content = await fetchResource(absoluteUrl, 'css');
+                        if (content) {
+                            results.css.content += content + '\n';
+                            results.css.fileCount++;
+                            results.css.byteCount += content.length;
+                        }
+                    } catch (error) {
+                        // File not found, continue
+                    }
+                }
             }
         }
     }
     
     if (results.js.fileCount === 0) {
-        console.log("No JS files found, trying common filenames...");
-        const commonJsFiles = [
-            'script.js', 'scripts.js', 'main.js', 'app.js', 'index.js', 'custom.js',
-            'js/script.js', 'js/main.js', 'js/app.js', 'assets/js/script.js'
+        console.log("No JS files found, trying common JS filenames with any extension...");
+        const commonJsBaseNames = [
+            'script', 'scripts', 'main', 'app', 'index', 'custom', 'bundle', 'vendor'
         ];
         
-        for (const jsFile of commonJsFiles) {
-            const absoluteUrl = resolveUrl(jsFile);
-            try {
-                const response = await axios.head(absoluteUrl, { 
-                    timeout: 2000,
-                    validateStatus: status => status === 200
-                });
-                
-                if (response.status === 200) {
-                    console.log(`Found common JS file: ${absoluteUrl}`);
-                    const content = await fetchResource(absoluteUrl, 'js');
-                    if (content) {
-                        results.js.content += content + '\n';
-                        results.js.fileCount++;
-                        results.js.byteCount += content.length;
+        const commonExtensions = ['.js', '.min.js', '.bundle.js', '.compiled.js'];
+        const commonPaths = ['', '/js/', '/scripts/', '/assets/js/', '/dist/js/', '/static/js/'];
+        
+        for (const path of commonPaths) {
+            for (const baseName of commonJsBaseNames) {
+                for (const ext of commonExtensions) {
+                    const jsFile = `${path}${baseName}${ext}`;
+                    const absoluteUrl = resolveUrl(jsFile);
+                    
+                    if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+                    
+                    try {
+                        const content = await fetchResource(absoluteUrl, 'js');
+                        if (content) {
+                            results.js.content += content + '\n';
+                            results.js.fileCount++;
+                            results.js.byteCount += content.length;
+                        }
+                    } catch (error) {
+                        // File not found, continue
                     }
                 }
-            } catch (error) {
-                // Silently continue if file not found
             }
         }
     }
     
-    // 8. Try directory listing or sitemaps for more resources
-    if (results.css.fileCount === 0 || results.js.fileCount === 0) {
-        try {
-            // Try to fetch robots.txt for hints
-            const robotsTxtUrl = `${baseUrlObj.origin}/robots.txt`;
-            const robotsTxt = await fetchResource(robotsTxtUrl, 'text');
+    // 10. Search for webpack/bundled asset paths
+    const webpackAssetPatterns = [
+        /\/static\/(?:js|css)\/([^"'\s)]+)/g,
+        /\/assets\/(?:js|css)\/([^"'\s)]+)/g,
+        /\/dist\/(?:js|css)\/([^"'\s)]+)/g,
+        /\/build\/(?:js|css)\/([^"'\s)]+)/g,
+        /\/chunk-[a-f0-9]+\.[a-f0-9]+\.(?:js|css)/g,
+        /\/main\.[a-f0-9]+\.chunk\.(?:js|css)/g,
+        /\/[0-9]+\.[a-f0-9]+\.chunk\.(?:js|css)/g,
+        /\/app\.[a-f0-9]+\.(?:js|css)/g
+    ];
+    
+    const webpackAssets = new Set();
+    
+    for (const pattern of webpackAssetPatterns) {
+        let wpMatch;
+        while((wpMatch = pattern.exec(htmlContent)) !== null) {
+            const assetPath = wpMatch[0].trim();
+            const absoluteUrl = resolveUrl(assetPath);
             
+            if (!absoluteUrl || processedUrls.has(absoluteUrl)) continue;
+            
+            webpackAssets.add(absoluteUrl);
+        }
+    }
+    
+    console.log(`Found ${webpackAssets.size} potential webpack assets`);
+    
+    for (const assetUrl of webpackAssets) {
+        if (assetUrl.includes('.css') || assetUrl.match(/\/static\/css\//)) {
+            const content = await fetchResource(assetUrl, 'css');
+            if (content) {
+                results.css.content += content + '\n';
+                results.css.fileCount++;
+                results.css.byteCount += content.length;
+            }
+        } else if (assetUrl.includes('.js') || assetUrl.match(/\/static\/js\//)) {
+            const content = await fetchResource(assetUrl, 'js');
+            if (content) {
+                results.js.content += content + '\n';
+                results.js.fileCount++;
+                results.js.byteCount += content.length;
+            }
+        }
+    }
+    
+    // 11. Try to find a robots.txt and sitemap for additional resource discovery
+    try {
+        const robotsTxtUrl = `${baseUrlObj.origin}/robots.txt`;
+        const robotsTxt = await fetchResource(robotsTxtUrl, 'text');
+        
+        if (robotsTxt) {
             // Look for sitemaps in robots.txt
             const sitemapMatches = robotsTxt.match(/Sitemap:\s*(.*)/g);
             if (sitemapMatches) {
@@ -269,6 +544,7 @@ const discoverAndFetchResources = async (htmlContent, url) => {
                         if (resourceMatches) {
                             for (const resourceMatch of resourceMatches) {
                                 const resourceUrl = resourceMatch.replace(/<loc>(.*)<\/loc>/, '$1');
+                                
                                 if (resourceUrl.endsWith('.css')) {
                                     const content = await fetchResource(resourceUrl, 'css');
                                     if (content) {
@@ -291,9 +567,9 @@ const discoverAndFetchResources = async (htmlContent, url) => {
                     }
                 }
             }
-        } catch (error) {
-            console.log(`Error fetching robots.txt: ${error.message}`);
         }
+    } catch (error) {
+        console.log(`Error fetching robots.txt: ${error.message}`);
     }
     
     return results;
@@ -301,7 +577,6 @@ const discoverAndFetchResources = async (htmlContent, url) => {
 
 // HTML evaluation with expanded checks
 const evaluateHTML = (htmlContent) => {
-    // [Your existing evaluateHTML implementation]
     const feedback = [];
     let score = 100;
     // Semantic tags
@@ -332,7 +607,6 @@ const evaluateHTML = (htmlContent) => {
 
 // Enhanced CSS evaluation for modularity and best practices
 const evaluateCSS = (cssContent) => {
-    // [Your existing evaluateCSS implementation]
     try {
         const results = csslint.verify(cssContent);
         const feedback = [];
@@ -362,7 +636,6 @@ const evaluateCSS = (cssContent) => {
 
 // Enhanced JavaScript evaluation
 const evaluateJavaScript = async (jsContent) => {
-    // [Your existing evaluateJavaScript implementation]
     try {
         const eslint = new ESLint();
         const [result] = await eslint.lintText(jsContent);
@@ -459,6 +732,7 @@ app.post('/analyze', async (req, res) => {
             };
         }
         
+        // JS Analysis
         // JS Analysis
         console.log(`Starting JavaScript analysis with ${resources.js.byteCount} bytes of content...`);
         let jsResults;
